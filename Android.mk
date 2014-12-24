@@ -517,4 +517,5 @@ endif
 
 commands_recovery_local_path :=
 
+endif
 endif # ($(RECOVERY_VARIANT),twrp)
