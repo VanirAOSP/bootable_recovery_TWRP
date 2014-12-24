@@ -31,15 +31,10 @@
 #include "mincrypt/rsa.h"
 #include "mincrypt/sha.h"
 #include "minui/minui.h"
-#ifdef HAVE_SELINUX
-#include "minzip/SysUtil.h"
-#include "minzip/Zip.h"
-#else
-#include "minzipold/SysUtil.h"
-#include "minzipold/Zip.h"
-#endif
 #include "mtdutils/mounts.h"
 #include "mtdutils/mtdutils.h"
+#include "minzip/SysUtil.h"
+#include "minzip/Zip.h"
 #include "verifier.h"
 #include "variables.h"
 #include "data.hpp"
@@ -257,30 +252,51 @@ extern "C" int TWinstall_zip(const char* path, int* wipe_cache) {
 	string strpath = path;
 	ZipArchive Zip;
 
-	gui_print("Installing '%s'...\nChecking for MD5 file...\n", path);
-	md5sum.setfn(strpath);
-	md5_return = md5sum.verify_md5digest();
-	if (md5_return == -2) { // md5 did not match
-		LOGERR("Aborting zip install\n");
+	if (strcmp(path, "error") == 0) {
+		LOGERR("Failed to get adb sideload file: '%s'\n", path);
 		return INSTALL_CORRUPT;
+	}
+
+	gui_print("Installing '%s'...\n", path);
+	if (strlen(path) < 9 || strncmp(path, "/sideload", 9) != 0) {
+		gui_print("Checking for MD5 file...\n");
+		md5sum.setfn(strpath);
+		md5_return = md5sum.verify_md5digest();
+		if (md5_return == -2) { // md5 did not match
+			LOGERR("Aborting zip install\n");
+			return INSTALL_CORRUPT;
+		}
 	}
 
 #ifndef TW_OEM_BUILD
 	DataManager::GetValue(TW_SIGNED_ZIP_VERIFY_VAR, zip_verify);
 #endif
 	DataManager::SetProgress(0);
+
+	MemMapping map;
+	if (sysMapFile(path, &map) != 0) {
+		LOGERR("Failed to sysMapFile '%s'\n", path);
+        return -1;
+    }
+
 	if (zip_verify) {
 		gui_print("Verifying zip signature...\n");
-		ret_val = verify_file(path);
+		ret_val = verify_file(map.addr, map.length);
 		if (ret_val != VERIFY_SUCCESS) {
 			LOGERR("Zip signature verification failed: %i\n", ret_val);
+			sysReleaseMap(&map);
 			return -1;
+		} else {
+			gui_print("Zip signature verified successfully.\n");
 		}
 	}
-	ret_val = mzOpenZipArchive(path, &Zip);
+	ret_val = mzOpenZipArchive(map.addr, map.length, &Zip);
 	if (ret_val != 0) {
 		LOGERR("Zip file is corrupt!\n", path);
+		sysReleaseMap(&map);
 		return INSTALL_CORRUPT;
 	}
-	return Run_Update_Binary(path, &Zip, wipe_cache);
+	ret_val = Run_Update_Binary(path, &Zip, wipe_cache);
+	sysReleaseMap(&map);
+	return ret_val;
 }

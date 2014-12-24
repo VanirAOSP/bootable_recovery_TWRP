@@ -3,10 +3,10 @@ include $(CLEAR_VARS)
 
 ifneq ($(TW_EXCLUDE_ENCRYPTED_BACKUPS), true)
 	# Build shared binary
-	LOCAL_SRC_FILES:= src/oaes.c \
+	LOCAL_SRC_FILES:= src/oaes.c
 	LOCAL_C_INCLUDES := \
-		bootable/recovery-twrp/openaes/src/isaac \
-		bootable/recovery-twrp/openaes/inc
+		$(commands_recovery_local_path)/openaes/src/isaac \
+		$(commands_recovery_local_path)/openaes/inc
 	LOCAL_CFLAGS:= -g -c -W
 	LOCAL_MODULE:=openaes
 	LOCAL_MODULE_TAGS:= eng
@@ -20,9 +20,9 @@ ifneq ($(TW_EXCLUDE_ENCRYPTED_BACKUPS), true)
 	LOCAL_MODULE := libopenaes
 	LOCAL_MODULE_TAGS := eng
 	LOCAL_C_INCLUDES := \
-		bootable/recovery-twrp/openaes/src/isaac \
-		bootable/recovery-twrp/openaes/inc
-	LOCAL_SRC_FILES = src/oaes_lib.c src/isaac/rand.c
+		$(commands_recovery_local_path)/openaes/src/isaac \
+		$(commands_recovery_local_path)/openaes/inc
+	LOCAL_SRC_FILES = src/oaes_lib.c src/isaac/rand.c src/ftime.c
 	LOCAL_SHARED_LIBRARIES = libc
 	include $(BUILD_SHARED_LIBRARY)
 
@@ -31,9 +31,9 @@ ifneq ($(TW_EXCLUDE_ENCRYPTED_BACKUPS), true)
 	LOCAL_MODULE := libopenaes_static
 	LOCAL_MODULE_TAGS := eng
 	LOCAL_C_INCLUDES := \
-		bootable/recovery-twrp/openaes/src/isaac \
-		bootable/recovery-twrp/openaes/inc
-	LOCAL_SRC_FILES = src/oaes_lib.c src/isaac/rand.c
+		$(commands_recovery_local_path)/openaes/src/isaac \
+		$(commands_recovery_local_path)/openaes/inc
+	LOCAL_SRC_FILES = src/oaes_lib.c src/isaac/rand.c src/ftime.c
 	LOCAL_STATIC_LIBRARIES = libc
 	include $(BUILD_STATIC_LIBRARY)
 endif

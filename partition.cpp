@@ -42,22 +42,16 @@
 #include "twrpDU.hpp"
 #include "fixPermissions.hpp"
 #include "infomanager.hpp"
+#include "set_metadata.h"
 extern "C" {
 	#include "mtdutils/mtdutils.h"
 	#include "mtdutils/mounts.h"
-#ifdef TW_INCLUDE_CRYPTO_SAMSUNG
-	#include "crypto/libcrypt_samsung/include/libcrypt_samsung.h"
-#endif
 #ifdef USE_EXT4
 	#include "make_ext4fs.h"
 #endif
 
 #ifdef TW_INCLUDE_CRYPTO
-	#ifdef TW_INCLUDE_JB_CRYPTO
-		#include "crypto/jb/cryptfs.h"
-	#else
-		#include "crypto/ics/cryptfs.h"
-	#endif
+	#include "crypto/lollipop/cryptfs.h"
 #endif
 }
 #ifdef HAVE_SELINUX
@@ -73,6 +67,7 @@ extern "C" {
 using namespace std;
 
 extern struct selabel_handle *selinux_handle;
+extern bool datamedia;
 
 struct flag_list {
 	const char *name;
@@ -107,7 +102,7 @@ static struct flag_list mount_flags[] = {
 	{ 0,            0 },
 };
 
-TWPartition::TWPartition(void) {
+TWPartition::TWPartition() {
 	Can_Be_Mounted = false;
 	Can_Be_Wiped = false;
 	Can_Be_Backed_Up = false;
@@ -134,6 +129,7 @@ TWPartition::TWPartition(void) {
 	Can_Be_Encrypted = false;
 	Is_Encrypted = false;
 	Is_Decrypted = false;
+	Mount_To_Decrypt = false;
 	Decrypted_Block_Device = "";
 	Display_Name = "";
 	Backup_Display_Name = "";
@@ -156,9 +152,8 @@ TWPartition::TWPartition(void) {
 	Format_Block_Size = 0;
 	Ignore_Blkid = false;
 	Retain_Layout_Version = false;
-#ifdef TW_INCLUDE_CRYPTO_SAMSUNG
-	EcryptFS_Password = "";
-#endif
+	Crypto_Key_Location = "footer";
+	MTP_Storage_ID = 0;
 }
 
 TWPartition::~TWPartition(void) {
@@ -271,27 +266,8 @@ bool TWPartition::Process_Fstab_Line(string Line, bool Display_Error) {
 			Can_Be_Backed_Up = true;
 			Can_Encrypt_Backup = true;
 			Use_Userdata_Encryption = true;
-#ifdef RECOVERY_SDCARD_ON_DATA
-			Storage_Name = "Internal Storage";
-			Has_Data_Media = true;
-			Is_Storage = true;
-			Is_Settings_Storage = true;
-			Storage_Path = "/data/media";
-			Symlink_Path = Storage_Path;
-			if (strcmp(EXPAND(TW_EXTERNAL_STORAGE_PATH), "/sdcard") == 0) {
-				Make_Dir("/emmc", Display_Error);
-				Symlink_Mount_Point = "/emmc";
-			} else {
-				Make_Dir("/sdcard", Display_Error);
-				Symlink_Mount_Point = "/sdcard";
-			}
-			if (Mount(false) && TWFunc::Path_Exists("/data/media/0")) {
-				Storage_Path = "/data/media/0";
-				Symlink_Path = Storage_Path;
-				DataManager::SetValue(TW_INTERNAL_PATH, "/data/media/0");
-				UnMount(true);
-			}
-#endif
+			if (datamedia)
+				Setup_Data_Media();
 #ifdef TW_INCLUDE_CRYPTO
 			Can_Be_Encrypted = true;
 			char crypto_blkdev[255];
@@ -305,22 +281,7 @@ bool TWPartition::Process_Fstab_Line(string Line, bool Display_Error) {
 				LOGINFO("Data already decrypted, new block device: '%s'\n", crypto_blkdev);
 			} else if (!Mount(false)) {
 				if (Is_Present) {
-#ifdef TW_INCLUDE_JB_CRYPTO
-					// No extra flags needed
-#else
-					property_set("ro.crypto.fs_type", CRYPTO_FS_TYPE);
-					property_set("ro.crypto.fs_real_blkdev", CRYPTO_REAL_BLKDEV);
-					property_set("ro.crypto.fs_mnt_point", CRYPTO_MNT_POINT);
-					property_set("ro.crypto.fs_options", CRYPTO_FS_OPTIONS);
-					property_set("ro.crypto.fs_flags", CRYPTO_FS_FLAGS);
-					property_set("ro.crypto.keyfile.userdata", CRYPTO_KEY_LOC);
-#ifdef CRYPTO_SD_FS_TYPE
-					property_set("ro.crypto.sd_fs_type", CRYPTO_SD_FS_TYPE);
-					property_set("ro.crypto.sd_fs_real_blkdev", CRYPTO_SD_REAL_BLKDEV);
-					property_set("ro.crypto.sd_fs_mnt_point", EXPAND(TW_INTERNAL_STORAGE_PATH));
-#endif
-					property_set("rw.km_fips_status", "ready");
-#endif
+					set_partition_data(Actual_Block_Device.c_str(), Crypto_Key_Location.c_str(), Fstab_File_System.c_str());
 					if (cryptfs_check_footer() == 0) {
 						Is_Encrypted = true;
 						Is_Decrypted = false;
@@ -342,14 +303,11 @@ bool TWPartition::Process_Fstab_Line(string Line, bool Display_Error) {
 				// unmounted state
 				UnMount(false);
 			}
-	#ifdef RECOVERY_SDCARD_ON_DATA
-			if (!Is_Encrypted || (Is_Encrypted && Is_Decrypted))
+			if (datamedia && (!Is_Encrypted || (Is_Encrypted && Is_Decrypted)))
 				Recreate_Media_Folder();
-	#endif
 #else
-	#ifdef RECOVERY_SDCARD_ON_DATA
-			Recreate_Media_Folder();
-	#endif
+			if (datamedia)
+				Recreate_Media_Folder();
 #endif
 		} else if (Mount_Point == "/cache") {
 			Display_Name = "Cache";
@@ -591,6 +549,17 @@ bool TWPartition::Process_Flags(string Flags, bool Display_Error) {
 				Mount_Options.resize(Mount_Options.size() - 1);
 			}
 			Process_FS_Flags(Mount_Options, Mount_Flags);
+		} else if ((ptr_len > 12 && strncmp(ptr, "encryptable=", 12) == 0) || (ptr_len > 13 && strncmp(ptr, "forceencrypt=", 13) == 0)) {
+			ptr += 12;
+			if (*ptr == '=') ptr++;
+			if (*ptr == '\"') ptr++;
+
+			Crypto_Key_Location = ptr;
+			if (Crypto_Key_Location.substr(Crypto_Key_Location.size() - 1, 1) == "\"") {
+				Crypto_Key_Location.resize(Crypto_Key_Location.size() - 1);
+			}
+		} else if (ptr_len > 8 && strncmp(ptr, "mounttodecrypt", 14) == 0) {
+			Mount_To_Decrypt = true;
 		} else {
 			if (Display_Error)
 				LOGERR("Unhandled flag: '%s'\n", ptr);
@@ -693,6 +662,32 @@ void TWPartition::Setup_AndSec(void) {
 	Make_Dir("/and-sec", true);
 	Recreate_AndSec_Folder();
 	Mount_Storage_Retry();
+}
+
+void TWPartition::Setup_Data_Media() {
+	LOGINFO("Setting up '%s' as data/media emulated storage.\n", Mount_Point.c_str());
+	Storage_Name = "Internal Storage";
+	Has_Data_Media = true;
+	Is_Storage = true;
+	Is_Settings_Storage = true;
+	Storage_Path = "/data/media";
+	Symlink_Path = Storage_Path;
+	if (strcmp(EXPAND(TW_EXTERNAL_STORAGE_PATH), "/sdcard") == 0) {
+		Make_Dir("/emmc", false);
+		Symlink_Mount_Point = "/emmc";
+	} else {
+		Make_Dir("/sdcard", false);
+		Symlink_Mount_Point = "/sdcard";
+	}
+	if (Mount(false) && TWFunc::Path_Exists("/data/media/0")) {
+		Storage_Path = "/data/media/0";
+		Symlink_Path = Storage_Path;
+		DataManager::SetValue(TW_INTERNAL_PATH, "/data/media/0");
+		UnMount(true);
+	}
+	DataManager::SetValue("tw_has_internal", 1);
+	DataManager::SetValue("tw_has_data_media", 1);
+	du.add_absolute_dir("/data/media");
 }
 
 void TWPartition::Find_Real_Block_Device(string& Block, bool Display_Error) {
@@ -859,7 +854,7 @@ bool TWPartition::Find_Partition_Size(void) {
 			char label[32], device[32];
 			unsigned long size = 0;
 
-			sscanf(line, "%s %lx %*lx %*lu %s", label, &size, device);
+			sscanf(line, "%s %lx %*x %*u %s", label, &size, device);
 
 			// Skip header, annotation	and blank lines
 			if ((strncmp(device, "/dev/", 5) != 0) || (strlen(line) < 8))
@@ -1014,25 +1009,7 @@ bool TWPartition::Mount(bool Display_Error) {
 		}
 #endif
 	}
-#ifdef TW_INCLUDE_CRYPTO_SAMSUNG
-	string MetaEcfsFile = EXPAND(TW_EXTERNAL_STORAGE_PATH);
-	MetaEcfsFile += "/.MetaEcfsFile";
-	if (EcryptFS_Password.size() > 0 && PartitionManager.Mount_By_Path("/data", false) && TWFunc::Path_Exists(MetaEcfsFile)) {
-		if (mount_ecryptfs_drive(EcryptFS_Password.c_str(), Mount_Point.c_str(), Mount_Point.c_str(), 0) != 0) {
-			if (Display_Error)
-				LOGERR("Unable to mount ecryptfs for '%s'\n", Mount_Point.c_str());
-			else
-				LOGINFO("Unable to mount ecryptfs for '%s'\n", Mount_Point.c_str());
-		} else {
-			LOGINFO("Successfully mounted ecryptfs for '%s'\n", Mount_Point.c_str());
-			Is_Decrypted = true;
-		}
-	} else if (Mount_Point == EXPAND(TW_EXTERNAL_STORAGE_PATH)) {
-		if (Is_Decrypted)
-			LOGINFO("Mounting external storage, '%s' is not encrypted\n", Mount_Point.c_str());
-		Is_Decrypted = false;
-	}
-#endif
+
 	if (Removable)
 		Update_Size(Display_Error);
 
@@ -1051,18 +1028,8 @@ bool TWPartition::UnMount(bool Display_Error) {
 		if (never_unmount_system == 1 && Mount_Point == "/system")
 			return true; // Never unmount system if you're not supposed to unmount it
 
-#ifdef TW_INCLUDE_CRYPTO_SAMSUNG
-		if (EcryptFS_Password.size() > 0) {
-			if (unmount_ecryptfs_drive(Mount_Point.c_str()) != 0) {
-				if (Display_Error)
-					LOGERR("Unable to unmount ecryptfs for '%s'\n", Mount_Point.c_str());
-				else
-					LOGINFO("Unable to unmount ecryptfs for '%s'\n", Mount_Point.c_str());
-			} else {
-				LOGINFO("Successfully unmounted ecryptfs for '%s'\n", Mount_Point.c_str());
-			}
-		}
-#endif
+		if (Is_Storage)
+			PartitionManager.Remove_MTP_Storage(MTP_Storage_ID);
 
 		if (!Symlink_Mount_Point.empty())
 			umount(Symlink_Mount_Point.c_str());
@@ -1074,8 +1041,9 @@ bool TWPartition::UnMount(bool Display_Error) {
 			else
 				LOGINFO("Unable to unmount '%s'\n", Mount_Point.c_str());
 			return false;
-		} else
+		} else {
 			return true;
+		}
 	} else {
 		return true;
 	}
@@ -1094,13 +1062,6 @@ bool TWPartition::Wipe(string New_File_System) {
 	if (Mount_Point == "/cache")
 		Log_Offset = 0;
 
-#ifdef TW_INCLUDE_CRYPTO_SAMSUNG
-	if (Mount_Point == "/data" && Mount(false)) {
-		if (TWFunc::Path_Exists("/data/system/edk_p_sd"))
-			TWFunc::copy_file("/data/system/edk_p_sd", "/tmp/edk_p_sd", 0600);
-	}
-#endif
-
 	if (Retain_Layout_Version && Mount(false) && TWFunc::Path_Exists(Layout_Filename))
 		TWFunc::copy_file(Layout_Filename, "/.layout_version", 0600);
 	else
@@ -1110,7 +1071,6 @@ bool TWPartition::Wipe(string New_File_System) {
 		wiped = Wipe_Data_Without_Wiping_Media();
 		recreate_media = false;
 	} else {
-
 		DataManager::GetValue(TW_RM_RF_VAR, check);
 
 		if (check || Use_Rm_Rf)
@@ -1136,15 +1096,6 @@ bool TWPartition::Wipe(string New_File_System) {
 	}
 
 	if (wiped) {
-#ifdef TW_INCLUDE_CRYPTO_SAMSUNG
-		if (Mount_Point == "/data" && Mount(false)) {
-			if (TWFunc::Path_Exists("/tmp/edk_p_sd")) {
-				Make_Dir("/data/system", true);
-				TWFunc::copy_file("/tmp/edk_p_sd", "/data/system/edk_p_sd", 0600);
-			}
-		}
-#endif
-
 		if (Mount_Point == "/cache")
 			DataManager::Output_Version();
 
@@ -1168,6 +1119,9 @@ bool TWPartition::Wipe(string New_File_System) {
 		if (Mount_Point == "/data" && Has_Data_Media && recreate_media) {
 			Recreate_Media_Folder();
 		}
+	}
+	if (Is_Storage) {
+		PartitionManager.Add_MTP_Storage(MTP_Storage_ID);
 	}
 	return wiped;
 }
@@ -1302,6 +1256,8 @@ bool TWPartition::Check_MD5(string restore_folder) {
 	int index = 0;
 	twrpDigest md5sum;
 
+	sync();
+
 	memset(split_filename, 0, sizeof(split_filename));
 	Full_Filename = restore_folder + "/" + Backup_FileName;
 	if (!TWFunc::Path_Exists(Full_Filename)) {
@@ -1374,13 +1330,13 @@ string TWPartition::Get_Restore_File_System(string restore_folder) {
 	first_period = Backup_FileName.find(".");
 	if (first_period == string::npos) {
 		LOGERR("Unable to find file system (first period).\n");
-		return false;
+		return string();
 	}
 	Restore_File_System = Backup_FileName.substr(first_period + 1, Backup_FileName.size() - first_period - 1);
 	second_period = Restore_File_System.find(".");
 	if (second_period == string::npos) {
 		LOGERR("Unable to find file system (second period).\n");
-		return false;
+		return string();
 	}
 	Restore_File_System.resize(second_period);
 	LOGINFO("Restore file system is: '%s'.\n", Restore_File_System.c_str());
@@ -1415,13 +1371,26 @@ bool TWPartition::Wipe_Encryption() {
 
 	Has_Data_Media = false;
 	Decrypted_Block_Device = "";
+#ifdef TW_INCLUDE_CRYPTO
+	if (Is_Decrypted) {
+		if (!UnMount(true))
+			return false;
+		if (delete_crypto_blk_dev("userdata") != 0) {
+			LOGERR("Error deleting crypto block device, continuing anyway.\n");
+		}
+	}
+#endif
 	Is_Decrypted = false;
 	Is_Encrypted = false;
+	Find_Actual_Block_Device();
 	if (Wipe(Fstab_File_System)) {
 		Has_Data_Media = Save_Data_Media;
 		if (Has_Data_Media && !Symlink_Mount_Point.empty()) {
 			Recreate_Media_Folder();
+			if (Mount(false))
+				PartitionManager.Add_MTP_Storage(MTP_Storage_ID);
 		}
+		DataManager::SetValue(TW_IS_ENCRYPTED, 0);
 #ifndef TW_OEM_BUILD
 		gui_print("You may need to reboot recovery to be able to use /data again.\n");
 #endif
@@ -1429,6 +1398,8 @@ bool TWPartition::Wipe_Encryption() {
 	} else {
 		Has_Data_Media = Save_Data_Media;
 		LOGERR("Unable to format to remove encryption.\n");
+		if (Has_Data_Media && Mount(false))
+			PartitionManager.Add_MTP_Storage(MTP_Storage_ID);
 		return false;
 	}
 	return false;
@@ -1489,6 +1460,11 @@ bool TWPartition::Wipe_EXT23(string File_System) {
 }
 
 bool TWPartition::Wipe_EXT4() {
+	Find_Actual_Block_Device();
+	if (!Is_Present) {
+		LOGERR("Block device not present, cannot wipe %s.\n", Display_Name.c_str());
+		return false;
+	}
 	if (!UnMount(true))
 		return false;
 
@@ -1634,6 +1610,11 @@ bool TWPartition::Wipe_MTD() {
 bool TWPartition::Wipe_RMRF() {
 	if (!Mount(true))
 		return false;
+	// This is the only wipe that leaves the partition mounted, so we
+	// must manually remove the partition from MTP if it is a storage
+	// partition.
+	if (Is_Storage)
+		PartitionManager.Remove_MTP_Storage(MTP_Storage_ID);
 
 	gui_print("Removing all files under '%s'\n", Mount_Point.c_str());
 	TWFunc::removeDir(Mount_Point, true);
@@ -1673,9 +1654,6 @@ bool TWPartition::Wipe_Data_Without_Wiping_Media() {
 	return Wipe_Encryption();
 #else
 	string dir;
-	#ifdef HAVE_SELINUX
-	fixPermissions perms;
-	#endif
 
 	// This handles wiping data on devices with "sdcard" in /data/media
 	if (!Mount(true))
@@ -1705,10 +1683,6 @@ bool TWPartition::Wipe_Data_Without_Wiping_Media() {
 			}
 		}
 		closedir(d);
-
-		#ifdef HAVE_SELINUX
-		perms.fixDataInternalContexts();
-		#endif
 
 		gui_print("Done.\n");
 		return true;
@@ -1781,9 +1755,10 @@ bool TWPartition::Backup_DD(string backup_folder) {
 
 	Full_FileName = backup_folder + "/" + Backup_FileName;
 
-	Command = "dd if=" + Actual_Block_Device + " of='" + Full_FileName + "'" + " bs=" + DD_BS + "c count=1";
+	Command = "dd if=" + Actual_Block_Device + " of='" + Full_FileName + "'" + " bs=" + DD_BS + " count=1";
 	LOGINFO("Backup command: '%s'\n", Command.c_str());
 	TWFunc::Exec_Cmd(Command);
+	tw_set_default_metadata(Full_FileName.c_str());
 	if (TWFunc::Get_File_Size(Full_FileName) == 0) {
 		LOGERR("Backup file size for '%s' is 0 bytes.\n", Full_FileName.c_str());
 		return false;
@@ -1807,6 +1782,7 @@ bool TWPartition::Backup_Dump_Image(string backup_folder) {
 	Command = "dump_image " + MTD_Name + " '" + Full_FileName + "'";
 	LOGINFO("Backup command: '%s'\n", Command.c_str());
 	TWFunc::Exec_Cmd(Command);
+	tw_set_default_metadata(Full_FileName.c_str());
 	if (TWFunc::Get_File_Size(Full_FileName) == 0) {
 		// Actual size may not match backup size due to bad blocks on MTD devices so just check for 0 bytes
 		LOGERR("Backup file size for '%s' is 0 bytes.\n", Full_FileName.c_str());
@@ -2018,9 +1994,9 @@ bool TWPartition::Update_Size(bool Display_Error) {
 }
 
 void TWPartition::Find_Actual_Block_Device(void) {
-	if (Is_Decrypted) {
+	if (Is_Decrypted && !Decrypted_Block_Device.empty()) {
 		Actual_Block_Device = Decrypted_Block_Device;
-		if (TWFunc::Path_Exists(Primary_Block_Device))
+		if (TWFunc::Path_Exists(Decrypted_Block_Device))
 			Is_Present = true;
 	} else if (TWFunc::Path_Exists(Primary_Block_Device)) {
 		Is_Present = true;
@@ -2039,19 +2015,21 @@ void TWPartition::Find_Actual_Block_Device(void) {
 void TWPartition::Recreate_Media_Folder(void) {
 	string Command;
 
-	#ifdef HAVE_SELINUX
-	fixPermissions perms;
-	#endif
-
 	if (!Mount(true)) {
 		LOGERR("Unable to recreate /data/media folder.\n");
 	} else if (!TWFunc::Path_Exists("/data/media")) {
 		PartitionManager.Mount_By_Path(Symlink_Mount_Point, true);
 		LOGINFO("Recreating /data/media folder.\n");
 		mkdir("/data/media", S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
-		#ifdef HAVE_SELINUX
+#ifdef HAVE_SELINUX
+		// Attempt to set the correct SELinux contexts on the folder
+		fixPermissions perms;
 		perms.fixDataInternalContexts();
-		#endif
+		// Afterwards, we will try to set the
+		// default metadata that we were hopefully able to get during
+		// early boot.
+		tw_set_default_metadata("/data/media");
+#endif
 		// Toggle mount to ensure that "internal sdcard" gets mounted
 		PartitionManager.UnMount_By_Path(Symlink_Mount_Point, true);
 		PartitionManager.Mount_By_Path(Symlink_Mount_Point, true);
@@ -2071,3 +2049,27 @@ void TWPartition::Recreate_AndSec_Folder(void) {
 		PartitionManager.UnMount_By_Path(Symlink_Mount_Point, true);
 	}
 }
+
+uint64_t TWPartition::Get_Max_FileSize() {
+	uint64_t maxFileSize = 0;
+	const uint64_t constGB = (uint64_t) 1024 * 1024 * 1024;
+	const uint64_t constTB = (uint64_t) constGB * 1024;
+	const uint64_t constPB = (uint64_t) constTB * 1024;
+	const uint64_t constEB = (uint64_t) constPB * 1024;
+	if (Current_File_System == "ext4")
+		maxFileSize = 16 * constTB; //16 TB
+	else if (Current_File_System == "vfat")
+		maxFileSize = 4 * constGB; //4 GB
+	else if (Current_File_System == "ntfs")
+		maxFileSize = 256 * constTB; //256 TB
+	else if (Current_File_System == "exfat")
+		maxFileSize = 16 * constPB; //16 PB
+	else if (Current_File_System == "ext3")
+		maxFileSize = 2 * constTB; //2 TB
+	else if (Current_File_System == "f2fs")
+		maxFileSize = 3.94 * constTB; //3.94 TB
+	else
+		maxFileSize = 100000000L;
+	return maxFileSize - 1;
+}
+

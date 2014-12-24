@@ -56,6 +56,7 @@ public:
 	bool Wipe();                                                              // Wipes the partition
 	bool Wipe_AndSec();                                                       // Wipes android secure
 	bool Can_Repair();                                                        // Checks to see if we have everything needed to be able to repair the current file system
+	uint64_t Get_Max_FileSize();					  	  //get partition maxFileSie
 	bool Repair();                                                            // Repairs the current file system
 	bool Backup(string backup_folder, const unsigned long long *overall_size, const unsigned long long *other_backups_size); // Backs up the partition to the folder specified
 	bool Check_MD5(string restore_folder);                                    // Checks MD5 of a backup
@@ -72,6 +73,13 @@ public:
 	string Current_File_System;                                               // Current file system
 	string Actual_Block_Device;                                               // Actual block device (one of primary, alternate, or decrypted)
 	string MTD_Name;                                                          // Name of the partition for MTD devices
+	bool Is_Present;                                                          // Indicates if the partition is currently present as a block device
+	string Crypto_Key_Location;                                               // Location of the crypto key used for decrypting encrypted data partitions
+	unsigned int MTP_Storage_ID;
+
+protected:
+	bool Has_Data_Media;                                                      // Indicates presence of /data/media, may affect wiping and backup methods
+	void Setup_Data_Media();                                                  // Sets up a partition as a /data/media emulated storage partition
 
 private:
 	bool Process_Fstab_Line(string Line, bool Display_Error);                 // Processes a fstab line
@@ -127,7 +135,6 @@ private:
 	string Alternate_Block_Device;                                            // Alternate block device (e.g. /dev/block/mmcblk1)
 	string Decrypted_Block_Device;                                            // Decrypted block device available after decryption
 	bool Removable;                                                           // Indicates if this partition is removable -- affects how often we check overall size, if present, etc.
-	bool Is_Present;                                                          // Indicates if the partition is currently present as a block device
 	int Length;                                                               // Used by make_ext4fs to leave free space at the end of the partition block for things like a crypto footer
 	unsigned long long Size;                                                  // Overall size of the partition
 	unsigned long long Used;                                                  // Overall used space
@@ -137,6 +144,7 @@ private:
 	bool Can_Be_Encrypted;                                                    // This partition might be encrypted, affects error handling, can only be true if crypto support is compiled in
 	bool Is_Encrypted;                                                        // This partition is thought to be encrypted -- it wouldn't mount for some reason, only avialble with crypto support
 	bool Is_Decrypted;                                                        // This partition has successfully been decrypted
+	bool Mount_To_Decrypt;                                                    // Mount this partition during decrypt (/vendor, /firmware, etc in case we need proprietary libs or firmware files)
 	string Display_Name;                                                      // Display name for the GUI
 	string Backup_Name;                                                       // Backup name -- used for backup filenames
 	string Backup_Display_Name;                                               // Name displayed in the partition list for backup selection
@@ -145,7 +153,6 @@ private:
 	Backup_Method_enum Backup_Method;                                         // Method used for backup
 	bool Can_Encrypt_Backup;                                                  // Indicates if this item can be encrypted during backup
 	bool Use_Userdata_Encryption;                                             // Indicates if we will use userdata encryption splitting on an encrypted backup
-	bool Has_Data_Media;                                                      // Indicates presence of /data/media, may affect wiping and backup methods
 	bool Has_Android_Secure;                                                  // Indicates the presence of .android_secure on this partition
 	bool Is_Storage;                                                          // Indicates if this partition is used for storage for backup, restore, and installing zips
 	bool Is_Settings_Storage;                                                 // Indicates that this storage partition is the location of the .twrps settings file and the location that is used for custom themes
@@ -156,9 +163,6 @@ private:
 	int Format_Block_Size;                                                    // Block size for formatting
 	bool Ignore_Blkid;                                                        // Ignore blkid results due to superblocks lying to us on certain devices / partitions
 	bool Retain_Layout_Version;                                               // Retains the .layout_version file during a wipe (needed on devices like Sony Xperia T where /data and /data/media are separate partitions)
-#ifdef TW_INCLUDE_CRYPTO_SAMSUNG
-	string EcryptFS_Password;                                                 // Have to store the encryption password to remount
-#endif
 
 friend class TWPartitionManager;
 friend class DataManager;
@@ -177,29 +181,17 @@ public:
 	int Write_Fstab();                                                        // Creates /etc/fstab file that's used by the command line for mount commands
 	void Output_Partition_Logging();                                          // Outputs partition information to the log
 	int Mount_By_Path(string Path, bool Display_Error);                       // Mounts partition based on path (e.g. /system)
-	int Mount_By_Block(string Block, bool Display_Error);                     // Mounts partition based on block device (e.g. /dev/block/mmcblk1p1)
-	int Mount_By_Name(string Name, bool Display_Error);                       // Mounts partition based on display name (e.g. System)
 	int UnMount_By_Path(string Path, bool Display_Error);                     // Unmounts partition based on path
-	int UnMount_By_Block(string Block, bool Display_Error);                   // Unmounts partition based on block device
-	int UnMount_By_Name(string Name, bool Display_Error);                     // Unmounts partition based on display name
 	int Is_Mounted_By_Path(string Path);                                      // Checks if partition is mounted based on path
-	int Is_Mounted_By_Block(string Block);                                    // Checks if partition is mounted based on block device
-	int Is_Mounted_By_Name(string Name);                                      // Checks if partition is mounted based on display name
 	int Mount_Current_Storage(bool Display_Error);                            // Mounts the current storage location
 	int Mount_Settings_Storage(bool Display_Error);                           // Mounts the settings file storage location (usually internal)
 	TWPartition* Find_Partition_By_Path(string Path);                         // Returns a pointer to a partition based on path
-	TWPartition* Find_Partition_By_Block(string Block);                       // Returns a pointer to a partition based on block device
-	TWPartition* Find_Partition_By_Name(string Block);                        // Returns a pointer to a partition based on name
 	int Check_Backup_Name(bool Display_Error);                                // Checks the current backup name to ensure that it is valid
 	int Run_Backup();                                                         // Initiates a backup in the current storage
 	int Run_Restore(string Restore_Name);                                     // Restores a backup
 	void Set_Restore_Files(string Restore_Name);                              // Used to gather a list of available backup partitions for the user to select for a restore
 	int Wipe_By_Path(string Path);                                            // Wipes a partition based on path
-	int Wipe_By_Block(string Block);                                          // Wipes a partition based on block device
-	int Wipe_By_Name(string Name);                                            // Wipes a partition based on display name
 	int Wipe_By_Path(string Path, string New_File_System);                    // Wipes a partition based on path
-	int Wipe_By_Block(string Block, string New_File_System);                  // Wipes a partition based on block device
-	int Wipe_By_Name(string Name, string New_File_System);                    // Wipes a partition based on display name
 	int Factory_Reset();                                                      // Performs a factory reset
 	int Wipe_Dalvik_Cache();                                                  // Wipes dalvik cache
 	int Wipe_Rotate_Data();                                                   // Wipes rotation data --
@@ -208,9 +200,6 @@ public:
 	int Format_Data();                                                        // Really formats data on /data/media devices -- also removes encryption
 	int Wipe_Media_From_Data();                                               // Removes and recreates the media folder on /data/media devices
 	int Repair_By_Path(string Path, bool Display_Error);                      // Repairs a partition based on path
-	int Repair_By_Block(string Block, bool Display_Error);                    // Repairs a partition based on block device
-	int Repair_By_Name(string Name, bool Display_Error);                      // Repairs a partition based on display name
-	void Refresh_Sizes();                                                     // Refreshes size data of partitions
 	void Update_System_Details();                                             // Updates fstab, file systems, sizes, etc.
 	int Decrypt_Device(string Password);                                      // Attempt to decrypt any encrypted partitions
 	int usb_storage_enable(void);                                             // Enable USB storage mode
@@ -224,6 +213,12 @@ public:
 	void Get_Partition_List(string ListType, std::vector<PartitionList> *Partition_List);
 	int Fstab_Processed();                                                    // Indicates if the fstab has been processed or not
 	void Output_Storage_Fstab();                                              // Creates a /cache/recovery/storage.fstab file with a list of all potential storage locations for app use
+	bool Enable_MTP();                                                        // Enables MTP
+	bool Disable_MTP();                                                       // Disables MTP
+	bool Add_MTP_Storage(string Mount_Point);                                 // Adds or removes an MTP Storage partition
+	bool Add_MTP_Storage(unsigned int Storage_ID);                            // Adds or removes an MTP Storage partition
+	bool Remove_MTP_Storage(string Mount_Point);                              // Adds or removes an MTP Storage partition
+	bool Remove_MTP_Storage(unsigned int Storage_ID);                         // Adds or removes an MTP Storage partition
 
 private:
 	void Setup_Settings_Storage_Partition(TWPartition* Part);                 // Sets up settings storage
@@ -232,8 +227,13 @@ private:
 	bool Backup_Partition(TWPartition* Part, string Backup_Folder, bool generate_md5, unsigned long long* img_bytes_remaining, unsigned long long* file_bytes_remaining, unsigned long *img_time, unsigned long *file_time, unsigned long long *img_bytes, unsigned long long *file_bytes);
 	bool Restore_Partition(TWPartition* Part, string Restore_Name, int partition_count, const unsigned long long *total_restore_size, unsigned long long *already_restored_size);
 	void Output_Partition(TWPartition* Part);
+	TWPartition* Find_Partition_By_MTP_Storage_ID(unsigned int Storage_ID);   // Returns a pointer to a partition based on MTP Storage ID
+	bool Add_Remove_MTP_Storage(TWPartition* Part, int message_type);   // Adds or removes an MTP Storage partition
 	TWPartition* Find_Next_Storage(string Path, string Exclude);
 	int Open_Lun_File(string Partition_Path, string Lun_File);
+	pid_t mtppid;
+	bool mtp_was_enabled;
+	int mtp_write_fd;
 
 private:
 	std::vector<TWPartition*> Partitions;                                     // Vector list of all partitions

@@ -3,11 +3,7 @@
 #ifndef _RESOURCE_HEADER
 #define _RESOURCE_HEADER
 
-#ifdef HAVE_SELINUX
 #include "../minzip/Zip.h"
-#else
-#include "../minzipold/Zip.h"
-#endif
 
 // Base Objects
 class Resource
@@ -38,6 +34,14 @@ typedef enum {
 class FontResource : public Resource
 {
 public:
+	enum Type
+	{
+		TYPE_TWRP,
+#ifndef TW_DISABLE_TTF
+		TYPE_TTF,
+#endif
+	};
+
 	FontResource(xml_node<>* node, ZipArchive* pZip);
 	virtual ~FontResource();
 
@@ -46,6 +50,7 @@ public:
 
 protected:
 	void* mFont;
+	Type m_type;
 };
 
 class ImageResource : public Resource
@@ -68,8 +73,8 @@ public:
 	virtual ~AnimationResource();
 
 public:
-	virtual void* GetResource(void) { return mSurfaces.at(0); }
-	virtual void* GetResource(int entry) { return mSurfaces.at(entry); }
+	virtual void* GetResource(void) { return mSurfaces.empty() ? NULL : mSurfaces.at(0); }
+	virtual void* GetResource(int entry) { return mSurfaces.empty() ? NULL : mSurfaces.at(entry); }
 	virtual int GetResourceCount(void) { return mSurfaces.size(); }
 
 protected:
@@ -81,6 +86,7 @@ class ResourceManager
 public:
 	ResourceManager(xml_node<>* resList, ZipArchive* pZip);
 	virtual ~ResourceManager();
+	void LoadResources(xml_node<>* resList, ZipArchive* pZip);
 
 public:
 	Resource* FindResource(std::string name);

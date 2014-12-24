@@ -42,6 +42,7 @@
 #include "partitions.hpp"
 #include "variables.h"
 #include "bootloader.h"
+#include "cutils/properties.h"
 #ifdef ANDROID_RB_POWEROFF
 	#include "cutils/android_reboot.h"
 #endif
@@ -49,9 +50,11 @@
 #ifndef TW_EXCLUDE_ENCRYPTED_BACKUPS
 	#include "openaes/inc/oaes_lib.h"
 #endif
+#include "cutils/android_reboot.h"
 
 extern "C" {
 	#include "libcrecovery/common.h"
+	#include "set_metadata.h"
 }
 
 /* Execute a command */
@@ -65,7 +68,7 @@ int TWFunc::Exec_Cmd(const string& cmd, string &result) {
 		memset(&buffer, 0, sizeof(buffer));
 		if (fgets(buffer, 128, exec) != NULL) {
 			buffer[128] = '\n';
-			buffer[129] = NULL;
+			buffer[129] = 0;
 			result += buffer;
 		}
 	}
@@ -404,9 +407,13 @@ int TWFunc::Recursive_Mkdir(string Path) {
 	while (pos != string::npos)
 	{
 		wholePath = pathCpy.substr(0, pos);
-		if (mkdir(wholePath.c_str(), 0777) && errno != EEXIST) {
-			LOGERR("Unable to create folder: %s  (errno=%d)\n", wholePath.c_str(), errno);
-			return false;
+		if (!TWFunc::Path_Exists(wholePath)) {
+			if (mkdir(wholePath.c_str(), 0777)) {
+				LOGERR("Unable to create folder: %s  (errno=%d)\n", wholePath.c_str(), errno);
+				return false;
+			} else {
+				tw_set_default_metadata(wholePath.c_str());
+			}
 		}
 
 		pos = pathCpy.find("/", pos + 1);
@@ -523,10 +530,22 @@ int TWFunc::tw_reboot(RebootCommand command)
 			return reboot(RB_AUTOBOOT);
 		case rb_recovery:
 			check_and_run_script("/sbin/rebootrecovery.sh", "reboot recovery");
+#ifdef ANDROID_RB_PROPERTY
+			property_set(ANDROID_RB_PROPERTY, "reboot,recovery");
+#else
 			return __reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2, (void*) "recovery");
+#endif
+			sleep(5);
+			return 0;
 		case rb_bootloader:
 			check_and_run_script("/sbin/rebootbootloader.sh", "reboot bootloader");
+#ifdef ANDROID_RB_PROPERTY
+			property_set(ANDROID_RB_PROPERTY, "reboot,bootloader");
+#else
 			return __reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2, (void*) "bootloader");
+#endif
+			sleep(5);
+			return 0;
 		case rb_poweroff:
 			check_and_run_script("/sbin/poweroff.sh", "power off");
 #ifdef ANDROID_RB_POWEROFF
@@ -535,7 +554,13 @@ int TWFunc::tw_reboot(RebootCommand command)
 			return reboot(RB_POWER_OFF);
 		case rb_download:
 			check_and_run_script("/sbin/rebootdownload.sh", "reboot download");
+#ifdef ANDROID_RB_PROPERTY
+			property_set(ANDROID_RB_PROPERTY, "reboot,download");
+#else
 			return __reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2, (void*) "download");
+#endif
+			sleep(5);
+			return 0;
 		default:
 			return -1;
 	}
@@ -659,6 +684,20 @@ int TWFunc::read_file(string fn, vector<string>& results) {
 	return -1;
 }
 
+int TWFunc::read_file(string fn, uint64_t& results) {
+	ifstream file;
+	file.open(fn.c_str(), ios::in);
+
+	if (file.is_open()) {
+		file >> results;
+		file.close();
+		return 0;
+	}
+
+	LOGINFO("Cannot find file %s\n", fn.c_str());
+	return -1;
+}
+
 int TWFunc::write_file(string fn, string& line) {
 	FILE *file;
 	file = fopen(fn.c_str(), "w");
@@ -696,127 +735,6 @@ int TWFunc::drop_caches(void) {
 	if (write_file(file, value) != 0)
 		return -1;
 	return 0;
-}
-
-int TWFunc::Check_su_Perms(void) {
-	struct stat st;
-	int ret = 0;
-
-	if (!PartitionManager.Mount_By_Path("/system", false))
-		return 0;
-
-	// Check to ensure that perms are 6755 for all 3 file locations
-	if (stat("/system/bin/su", &st) == 0) {
-		if ((st.st_mode & (S_ISUID | S_ISGID | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)) != (S_ISUID | S_ISGID | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) || st.st_uid != 0 || st.st_gid != 0) {
-			ret = 1;
-		}
-	}
-	if (stat("/system/xbin/su", &st) == 0) {
-		if ((st.st_mode & (S_ISUID | S_ISGID | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)) != (S_ISUID | S_ISGID | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) || st.st_uid != 0 || st.st_gid != 0) {
-			ret += 2;
-		}
-	}
-	if (stat("/system/bin/.ext/.su", &st) == 0) {
-		if ((st.st_mode & (S_ISUID | S_ISGID | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)) != (S_ISUID | S_ISGID | S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) || st.st_uid != 0 || st.st_gid != 0) {
-			ret += 4;
-		}
-	}
-	return ret;
-}
-
-bool TWFunc::Fix_su_Perms(void) {
-	if (!PartitionManager.Mount_By_Path("/system", true))
-		return false;
-
-	string propvalue = System_Property_Get("ro.build.version.sdk");
-	string su_perms = "6755";
-	if (!propvalue.empty()) {
-		int sdk_version = atoi(propvalue.c_str());
-		if (sdk_version >= 18)
-			su_perms = "0755";
-	}
-
-	string file = "/system/bin/su";
-	if (TWFunc::Path_Exists(file)) {
-		if (chown(file.c_str(), 0, 0) != 0) {
-			LOGERR("Failed to chown '%s'\n", file.c_str());
-			return false;
-		}
-		if (tw_chmod(file, su_perms) != 0) {
-			LOGERR("Failed to chmod '%s'\n", file.c_str());
-			return false;
-		}
-	}
-	file = "/system/xbin/su";
-	if (TWFunc::Path_Exists(file)) {
-		if (chown(file.c_str(), 0, 0) != 0) {
-			LOGERR("Failed to chown '%s'\n", file.c_str());
-			return false;
-		}
-		if (tw_chmod(file, su_perms) != 0) {
-			LOGERR("Failed to chmod '%s'\n", file.c_str());
-			return false;
-		}
-	}
-	file = "/system/xbin/daemonsu";
-	if (TWFunc::Path_Exists(file)) {
-		if (chown(file.c_str(), 0, 0) != 0) {
-			LOGERR("Failed to chown '%s'\n", file.c_str());
-			return false;
-		}
-		if (tw_chmod(file, "0755") != 0) {
-			LOGERR("Failed to chmod '%s'\n", file.c_str());
-			return false;
-		}
-	}
-	file = "/system/bin/.ext/.su";
-	if (TWFunc::Path_Exists(file)) {
-		if (chown(file.c_str(), 0, 0) != 0) {
-			LOGERR("Failed to chown '%s'\n", file.c_str());
-			return false;
-		}
-		if (tw_chmod(file, su_perms) != 0) {
-			LOGERR("Failed to chmod '%s'\n", file.c_str());
-			return false;
-		}
-	}
-	file = "/system/etc/install-recovery.sh";
-	if (TWFunc::Path_Exists(file)) {
-		if (chown(file.c_str(), 0, 0) != 0) {
-			LOGERR("Failed to chown '%s'\n", file.c_str());
-			return false;
-		}
-		if (tw_chmod(file, "0755") != 0) {
-			LOGERR("Failed to chmod '%s'\n", file.c_str());
-			return false;
-		}
-	}
-	file = "/system/etc/init.d/99SuperSUDaemon";
-	if (TWFunc::Path_Exists(file)) {
-		if (chown(file.c_str(), 0, 0) != 0) {
-			LOGERR("Failed to chown '%s'\n", file.c_str());
-			return false;
-		}
-		if (tw_chmod(file, "0755") != 0) {
-			LOGERR("Failed to chmod '%s'\n", file.c_str());
-			return false;
-		}
-	}
-	file = "/system/app/Superuser.apk";
-	if (TWFunc::Path_Exists(file)) {
-		if (chown(file.c_str(), 0, 0) != 0) {
-			LOGERR("Failed to chown '%s'\n", file.c_str());
-			return false;
-		}
-		if (tw_chmod(file, "0644") != 0) {
-			LOGERR("Failed to chmod '%s'\n", file.c_str());
-			return false;
-		}
-	}
-	sync();
-	if (!PartitionManager.UnMount_By_Path("/system", true))
-		return false;
-	return true;
 }
 
 int TWFunc::tw_chmod(const string& fn, const string& mode) {
@@ -939,43 +857,7 @@ bool TWFunc::Install_SuperSU(void) {
 	if (!PartitionManager.Mount_By_Path("/system", true))
 		return false;
 
-	TWFunc::Exec_Cmd("/sbin/chattr -i /system/xbin/su");
-	if (copy_file("/supersu/su", "/system/xbin/su", 0755) != 0) {
-		LOGERR("Failed to copy su binary to /system/bin\n");
-		return false;
-	}
-	if (!Path_Exists("/system/bin/.ext")) {
-		mkdir("/system/bin/.ext", 0777);
-	}
-	TWFunc::Exec_Cmd("/sbin/chattr -i /system/bin/.ext/su");
-	if (copy_file("/supersu/su", "/system/bin/.ext/su", 0755) != 0) {
-		LOGERR("Failed to copy su binary to /system/bin/.ext/su\n");
-		return false;
-	}
-	TWFunc::Exec_Cmd("/sbin/chattr -i /system/xbin/daemonsu");
-	if (copy_file("/supersu/su", "/system/xbin/daemonsu", 0755) != 0) {
-		LOGERR("Failed to copy su binary to /system/xbin/daemonsu\n");
-		return false;
-	}
-	if (Path_Exists("/system/etc/init.d")) {
-		TWFunc::Exec_Cmd("/sbin/chattr -i /system/etc/init.d/99SuperSUDaemon");
-		if (copy_file("/supersu/99SuperSUDaemon", "/system/etc/init.d/99SuperSUDaemon", 0755) != 0) {
-			LOGERR("Failed to copy 99SuperSUDaemon to /system/etc/init.d/99SuperSUDaemon\n");
-			return false;
-		}
-	} else {
-		TWFunc::Exec_Cmd("/sbin/chattr -i /system/etc/install-recovery.sh");
-		if (copy_file("/supersu/install-recovery.sh", "/system/etc/install-recovery.sh", 0755) != 0) {
-			LOGERR("Failed to copy install-recovery.sh to /system/etc/install-recovery.sh\n");
-			return false;
-		}
-	}
-	if (copy_file("/supersu/Superuser.apk", "/system/app/Superuser.apk", 0644) != 0) {
-		LOGERR("Failed to copy Superuser app to /system/app\n");
-		return false;
-	}
-	if (!Fix_su_Perms())
-		return false;
+	check_and_run_script("/supersu/install-supersu.sh", "SuperSU");
 	return true;
 }
 
@@ -1076,6 +958,38 @@ void TWFunc::Auto_Generate_Backup_Name() {
 void TWFunc::Fixup_Time_On_Boot()
 {
 #ifdef QCOM_RTC_FIX
+
+	LOGINFO("TWFunc::Fixup_Time: Pre-fix date and time: %s\n", TWFunc::Get_Current_Date().c_str());
+
+	struct timeval tv;
+	uint64_t offset = 0;
+	std::string sepoch = "/sys/class/rtc/rtc0/since_epoch";
+
+	if (TWFunc::read_file(sepoch, offset) == 0) {
+
+		LOGINFO("TWFunc::Fixup_Time: Setting time offset from file %s\n", sepoch.c_str());
+
+		tv.tv_sec = offset;
+		tv.tv_usec = 0;
+		settimeofday(&tv, NULL);
+
+		gettimeofday(&tv, NULL);
+
+		if (tv.tv_sec > 1405209403) { // Anything older then 12 Jul 2014 23:56:43 GMT will do nicely thank you ;)
+
+			LOGINFO("TWFunc::Fixup_Time: Date and time corrected: %s\n", TWFunc::Get_Current_Date().c_str());
+			return;
+
+		}
+
+	} else {
+
+		LOGINFO("TWFunc::Fixup_Time: opening %s failed\n", sepoch.c_str());
+
+	}
+
+	LOGINFO("TWFunc::Fixup_Time: will attempt to use the ats files now.\n", sepoch.c_str());
+
 	// Devices with Qualcomm Snapdragon 800 do some shenanigans with RTC.
 	// They never set it, it just ticks forward from 1970-01-01 00:00,
 	// and then they have files /data/system/time/ats_* with 64bit offset
@@ -1087,10 +1001,9 @@ void TWFunc::Fixup_Time_On_Boot()
 
 	static const char *paths[] = { "/data/system/time/", "/data/time/"  };
 
-	DIR *d;
 	FILE *f;
-	uint64_t offset = 0;
-	struct timeval tv;
+	DIR *d;
+	offset = 0;
 	struct dirent *dt;
 	std::string ats_path;
 
@@ -1120,7 +1033,7 @@ void TWFunc::Fixup_Time_On_Boot()
 
 	if(ats_path.empty())
 	{
-		LOGINFO("TWFunc::Fixup_Time: no ats files found, leaving time as-is!\n");
+		LOGINFO("TWFunc::Fixup_Time: no ats files found, leaving untouched!\n");
 		return;
 	}
 
@@ -1153,6 +1066,9 @@ void TWFunc::Fixup_Time_On_Boot()
 	}
 
 	settimeofday(&tv, NULL);
+
+	LOGINFO("TWFunc::Fixup_Time: Date and time corrected: %s\n", TWFunc::Get_Current_Date().c_str());
+
 #endif
 }
 
@@ -1192,6 +1108,58 @@ bool TWFunc::Create_Dir_Recursive(const std::string& path, mode_t mode, uid_t ui
 		}
 	}
 	return true;
+}
+
+int TWFunc::Set_Brightness(std::string brightness_value)
+{
+
+	std::string brightness_file = DataManager::GetStrValue("tw_brightness_file");;
+
+	if (brightness_file.compare("/nobrightness") != 0) {
+		std::string secondary_brightness_file = DataManager::GetStrValue("tw_secondary_brightness_file");
+		LOGINFO("TWFunc::Set_Brightness: Setting brightness control to %s\n", brightness_value.c_str());
+		int result = TWFunc::write_file(brightness_file, brightness_value);
+		if (secondary_brightness_file != "") {
+			LOGINFO("TWFunc::Set_Brightness: Setting SECONDARY brightness control to %s\n", brightness_value.c_str());
+			TWFunc::write_file(secondary_brightness_file, brightness_value);
+		}
+		return result;
+	}
+	return -1;
+}
+
+bool TWFunc::Toggle_MTP(bool enable) {
+#ifdef TW_HAS_MTP
+	static int was_enabled = false;
+
+	if (enable && was_enabled) {
+		if (!PartitionManager.Enable_MTP())
+			PartitionManager.Disable_MTP();
+	} else {
+		was_enabled = DataManager::GetIntValue("tw_mtp_enabled");
+		PartitionManager.Disable_MTP();
+		usleep(500);
+	}
+	return was_enabled;
+#else
+	return false;
+#endif
+}
+
+void TWFunc::SetPerformanceMode(bool mode) {
+	if (mode) {
+		property_set("recovery.perf.mode", "1");
+	} else {
+		property_set("recovery.perf.mode", "0");
+	}
+	// Some time for events to catch up to init handlers
+	usleep(500000);
+}
+
+std::string TWFunc::to_string(unsigned long value) {
+	std::ostringstream os;
+	os << value;
+	return os.str();
 }
 
 #endif // ndef BUILD_TWRPTAR_MAIN

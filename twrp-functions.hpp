@@ -70,10 +70,9 @@ public:
 	static int32_t timespec_diff_ms(timespec& start, timespec& end);            // Returns diff in ms
 	static int read_file(string fn, vector<string>& results); //read from file
 	static int read_file(string fn, string& results); //read from file
+	static int read_file(string fn, uint64_t& results); //read from file
 	static int write_file(string fn, string& line); //write from file
 	static int drop_caches(void); //drop linux cache memory
-	static int Check_su_Perms(void); // check perms and owner of su binary in various locations
-	static bool Fix_su_Perms(void); // sets proper permissions for su binaries and superuser apk
 	static int tw_chmod(const string& fn, const string& mode); // chmod function that converts a 3 or 4 char string into st_mode automatically
 	static bool Install_SuperSU(void); // Installs su binary and apk and sets proper permissions
 	static bool Try_Decrypting_Backup(string Restore_Path, string Password); // true for success, false for failed to decrypt
@@ -83,6 +82,11 @@ public:
 	static void Fixup_Time_On_Boot(); // Fixes time on devices which need it
 	static std::vector<std::string> Split_String(const std::string& str, const std::string& delimiter, bool removeEmpty = true); // Splits string by delimiter
 	static bool Create_Dir_Recursive(const std::string& path, mode_t mode = 0755, uid_t uid = -1, gid_t gid = -1);  // Create directory and it's parents, if they don't exist. mode, uid and gid are set to all _newly_ created folders. If whole path exists, do nothing.
+	static int Set_Brightness(std::string brightness_value); // Well, you can read, it does what it says, passing return int from TWFunc::Write_File ;)
+	static bool Toggle_MTP(bool enable);                                        // Disables MTP if enable is false and re-enables MTP if enable is true and it was enabled the last time it was toggled off
+	static std::string to_string(unsigned long value); //convert ul to string
+
+	static void SetPerformanceMode(bool mode); // support recovery.perf.mode
 
 private:
 	static void Copy_Log(string Source, string Destination);

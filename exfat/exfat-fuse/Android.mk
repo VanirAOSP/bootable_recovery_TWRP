@@ -9,14 +9,9 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_CFLAGS = -D_FILE_OFFSET_BITS=64
 LOCAL_SRC_FILES = main.c 
 LOCAL_C_INCLUDES += $(LOCAL_PATH) \
-					bootable/recovery-twrp/exfat/libexfat \
-					bootable/recovery-twrp/fuse/include
+					$(commands_recovery_local_path)/exfat/libexfat \
+					$(commands_recovery_local_path)/fuse/include
 LOCAL_SHARED_LIBRARIES += libz libc libexfat libdl 
 LOCAL_STATIC_LIBRARIES += libfusetwrp
 
 include $(BUILD_EXECUTABLE)
-
-# We need this so that the installed files could be picked up based on the
-# local module name
-ALL_MODULES.$(LOCAL_MODULE).INSTALLED := \
-    $(ALL_MODULES.$(LOCAL_MODULE).INSTALLED) $(SYMLINKS)

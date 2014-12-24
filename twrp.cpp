@@ -1,6 +1,4 @@
 /*
-
-ccdd
 		TWRP is free software: you can redistribute it and/or modify
 		it under the terms of the GNU General Public License as published by
 		the Free Software Foundation, either version 3 of the License, or
@@ -37,6 +35,7 @@ extern "C" {
 
 extern "C" {
 #include "gui/gui.h"
+#include "set_metadata.h"
 }
 #include "twcommon.h"
 #include "twrp-functions.hpp"
@@ -53,6 +52,7 @@ struct selabel_handle *selinux_handle;
 
 TWPartitionManager PartitionManager;
 int Log_Offset;
+bool datamedia;
 twrpDU du;
 
 static void Print_Prop(const char *key, const char *name, void *cookie) {
@@ -78,15 +78,21 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
+#ifdef RECOVERY_SDCARD_ON_DATA
+	datamedia = true;
+#endif
+
 	char crash_prop_val[PROPERTY_VALUE_MAX];
 	int crash_counter;
 	property_get("twrp.crash_counter", crash_prop_val, "-1");
 	crash_counter = atoi(crash_prop_val) + 1;
 	snprintf(crash_prop_val, sizeof(crash_prop_val), "%d", crash_counter);
 	property_set("twrp.crash_counter", crash_prop_val);
+	property_set("ro.twrp.boot", "1");
+	property_set("ro.twrp.version", TW_VERSION_STR);
 
 	time_t StartupTime = time(NULL);
-	printf("Starting TWRP %s on %s", TW_VERSION_STR, ctime(&StartupTime));
+	printf("Starting TWRP %s on %s (pid %d)", TW_VERSION_STR, ctime(&StartupTime), getpid());
 
 	// Load default values to set DataManager constants and handle ifdefs
 	DataManager::SetDefaultValues();
@@ -155,7 +161,7 @@ int main(int argc, char **argv) {
 	PartitionManager.Mount_By_Path("/cache", true);
 
 	string Zip_File, Reboot_Value;
-	bool Cache_Wipe = false, Factory_Reset = false, Perform_Backup = false;
+	bool Cache_Wipe = false, Factory_Reset = false, Perform_Backup = false, Shutdown = false;
 
 	{
 		TWPartition* misc = PartitionManager.Find_Partition_By_Path("/misc");
@@ -201,6 +207,8 @@ int main(int argc, char **argv) {
 					Cache_Wipe = true;
 			} else if (*argptr == 'n') {
 				Perform_Backup = true;
+			} else if (*argptr == 'p') {
+				Shutdown = true;
 			} else if (*argptr == 's') {
 				ptr = argptr;
 				index2 = 0;
@@ -267,9 +275,22 @@ int main(int argc, char **argv) {
 		if (gui_startPage("decrypt") != 0) {
 			LOGERR("Failed to start decrypt GUI page.\n");
 		}
+	} else if (datamedia) {
+		if (tw_get_default_metadata(DataManager::GetSettingsStoragePath().c_str()) != 0) {
+			LOGERR("Failed to get default contexts and file mode for storage files.\n");
+		} else {
+			LOGINFO("Got default contexts and file mode for storage files.\n");
+		}
 	}
 
 	// Read the settings file
+#ifdef TW_HAS_MTP
+	// We unmount partitions sometimes during early boot which may override
+	// the default of MTP being enabled by auto toggling MTP off. This
+	// will force it back to enabled then get overridden by the settings
+	// file, assuming that an entry for tw_mtp_enabled is set.
+	DataManager::SetValue("tw_mtp_enabled", 1);
+#endif
 	DataManager::ReadSettingsFile();
 
 	// Fixup the RTC clock on devices which require it
@@ -280,6 +301,34 @@ int main(int argc, char **argv) {
 	if (DataManager::GetIntValue(TW_IS_ENCRYPTED) == 0 && (TWFunc::Path_Exists(SCRIPT_FILE_TMP) || TWFunc::Path_Exists(SCRIPT_FILE_CACHE))) {
 		OpenRecoveryScript::Run_OpenRecoveryScript();
 	}
+
+#ifdef TW_HAS_MTP
+	// Enable MTP?
+	char mtp_crash_check[PROPERTY_VALUE_MAX];
+	property_get("mtp.crash_check", mtp_crash_check, "0");
+	if (strcmp(mtp_crash_check, "0") == 0) {
+		property_set("mtp.crash_check", "1");
+		if (DataManager::GetIntValue(TW_IS_ENCRYPTED) != 0) {
+			if (DataManager::GetIntValue(TW_IS_DECRYPTED) != 0 && DataManager::GetIntValue("tw_mtp_enabled") == 1) {
+				LOGINFO("Enabling MTP during startup\n");
+				if (!PartitionManager.Enable_MTP())
+					PartitionManager.Disable_MTP();
+				else
+					gui_print("MTP Enabled\n");
+			}
+		} else if (DataManager::GetIntValue("tw_mtp_enabled") == 1) {
+			LOGINFO("Enabling MTP during startup\n");
+			if (!PartitionManager.Enable_MTP())
+				PartitionManager.Disable_MTP();
+			else
+				gui_print("MTP Enabled\n");
+		}
+		property_set("mtp.crash_check", "0");
+	} else {
+		gui_print_color("warning", "MTP Crashed, not starting MTP on boot.\n");
+		DataManager::SetValue("tw_mtp_enabled", 0);
+	}
+#endif
 
 	// Launch the main GUI
 	gui_start();
@@ -297,10 +346,6 @@ int main(int argc, char **argv) {
 			if (gui_startPage("installsu") != 0) {
 				LOGERR("Failed to start SuperSU install page.\n");
 			}
-		} else if (TWFunc::Check_su_Perms() > 0) {
-			// su perms are set incorrectly
-			LOGINFO("Root permissions appear to be lost... fixing. (This will always happen on 4.3+ ROMs with SELinux.\n");
-			TWFunc::Fix_su_Perms();
 		}
 		sync();
 		PartitionManager.UnMount_By_Path("/system", false);

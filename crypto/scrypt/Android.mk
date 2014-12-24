@@ -10,4 +10,4 @@ LOCAL_PATH := $(call my-dir)
 include $(LOCAL_PATH)/build-config.mk
 include $(LOCAL_PATH)/Scrypt.mk
 
-include $(call all-named-subdir-makefiles,tests)
+include $(LOCAL_PATH)/tests/Android.mk

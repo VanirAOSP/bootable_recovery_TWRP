@@ -28,14 +28,6 @@
 #include <set>
 #include <time.h>
 
-extern "C" {
-#ifdef HAVE_SELINUX
-#include "../minzip/Zip.h"
-#else
-#include "../minzipold/Zip.h"
-#endif
-}
-
 using namespace rapidxml;
 
 #include "../data.hpp"
@@ -999,7 +991,11 @@ protected:
 	int mFontHeight;
 	GUIAction *mAction;
 	bool mChangeOnDrag;
-	int lineW;
+	int mLineW;
+	bool mDragging;
+	Resource *mBackgroundImage;
+	Resource *mHandleImage;
+	Resource *mHandleHoverImage;
 };
 
 class MouseCursor : public RenderObject

@@ -65,27 +65,82 @@ FontResource::FontResource(xml_node<>* node, ZipArchive* pZip)
  : Resource(node, pZip)
 {
 	std::string file;
+	xml_attribute<>* attr;
 
 	mFont = NULL;
 	if (!node)
 		return;
 
-	if (node->first_attribute("filename"))
-		file = node->first_attribute("filename")->value();
+	attr = node->first_attribute("filename");
+	if (!attr)
+		return;
 
-	if (ExtractResource(pZip, "fonts", file, ".dat", TMP_RESOURCE_NAME) == 0)
+	file = attr->value();
+
+#ifndef TW_DISABLE_TTF
+	if(file.size() >= 4 && file.compare(file.size()-4, 4, ".ttf") == 0)
 	{
-		mFont = gr_loadFont(TMP_RESOURCE_NAME);
-		unlink(TMP_RESOURCE_NAME);
+		m_type = TYPE_TTF;
+
+		attr = node->first_attribute("size");
+		if(!attr)
+			return;
+
+		int size = atoi(attr->value());
+		int dpi = 300;
+
+		attr = node->first_attribute("dpi");
+		if(attr)
+			dpi = atoi(attr->value());
+
+		if (ExtractResource(pZip, "fonts", file, "", TMP_RESOURCE_NAME) == 0)
+		{
+			mFont = gr_ttf_loadFont(TMP_RESOURCE_NAME, size, dpi);
+			unlink(TMP_RESOURCE_NAME);
+		}
+		else
+		{
+			file = std::string("/res/fonts/") + file;
+			mFont = gr_ttf_loadFont(file.c_str(), size, dpi);
+		}
 	}
 	else
+#endif
 	{
-		mFont = gr_loadFont(file.c_str());
+		m_type = TYPE_TWRP;
+
+		if(file.size() >= 4 && file.compare(file.size()-4, 4, ".ttf") == 0)
+		{
+			attr = node->first_attribute("fallback");
+			if (!attr)
+				return;
+
+			file = attr->value();
+		}
+
+		if (ExtractResource(pZip, "fonts", file, ".dat", TMP_RESOURCE_NAME) == 0)
+		{
+			mFont = gr_loadFont(TMP_RESOURCE_NAME);
+			unlink(TMP_RESOURCE_NAME);
+		}
+		else
+		{
+			mFont = gr_loadFont(file.c_str());
+		}
 	}
 }
 
 FontResource::~FontResource()
 {
+	if(mFont)
+	{
+#ifndef TW_DISABLE_TTF
+		if(m_type == TYPE_TTF)
+			gr_ttf_freeFont(mFont);
+		else
+#endif
+			gr_freeFont(mFont);
+	}
 }
 
 ImageResource::ImageResource(xml_node<>* node, ZipArchive* pZip)
@@ -94,8 +149,10 @@ ImageResource::ImageResource(xml_node<>* node, ZipArchive* pZip)
 	std::string file;
 
 	mSurface = NULL;
-	if (!node)
+	if (!node) {
+		LOGERR("ImageResource node is NULL\n");
 		return;
+	}
 
 	if (node->first_attribute("filename"))
 		file = node->first_attribute("filename")->value();
@@ -183,11 +240,15 @@ Resource* ResourceManager::FindResource(std::string name)
 
 ResourceManager::ResourceManager(xml_node<>* resList, ZipArchive* pZip)
 {
+	LoadResources(resList, pZip);
+}
+
+void ResourceManager::LoadResources(xml_node<>* resList, ZipArchive* pZip)
+{
 	xml_node<>* child;
 
 	if (!resList)
 		return;
-
 	child = resList->first_node("resource");
 	while (child != NULL)
 	{
@@ -202,10 +263,13 @@ ResourceManager::ResourceManager(xml_node<>* resList, ZipArchive* pZip)
 			FontResource* res = new FontResource(child, pZip);
 			if (res == NULL || res->GetResource() == NULL)
 			{
-				xml_attribute<>* attr_name = child->first_attribute("name");
+				std::string res_name;
+				if (child->first_attribute("name"))
+					res_name = child->first_attribute("name")->value();
+				if (res_name.empty() && child->first_attribute("filename"))
+					res_name = child->first_attribute("filename")->value();
 
-				if (!attr_name) {
-					std::string res_name = attr_name->value();
+				if (!res_name.empty()) {
 					LOGERR("Resource (%s)-(%s) failed to load\n", type.c_str(), res_name.c_str());
 				} else
 					LOGERR("Resource type (%s) failed to load\n", type.c_str());
@@ -222,10 +286,13 @@ ResourceManager::ResourceManager(xml_node<>* resList, ZipArchive* pZip)
 			ImageResource* res = new ImageResource(child, pZip);
 			if (res == NULL || res->GetResource() == NULL)
 			{
-				xml_attribute<>* attr_name = child->first_attribute("name");
+				std::string res_name;
+				if (child->first_attribute("name"))
+					res_name = child->first_attribute("name")->value();
+				if (res_name.empty() && child->first_attribute("filename"))
+					res_name = child->first_attribute("filename")->value();
 
-				if (!attr_name) {
-					std::string res_name = attr_name->value();
+				if (!res_name.empty()) {
 					LOGERR("Resource (%s)-(%s) failed to load\n", type.c_str(), res_name.c_str());
 				} else
 					LOGERR("Resource type (%s) failed to load\n", type.c_str());
@@ -242,10 +309,13 @@ ResourceManager::ResourceManager(xml_node<>* resList, ZipArchive* pZip)
 			AnimationResource* res = new AnimationResource(child, pZip);
 			if (res == NULL || res->GetResource() == NULL)
 			{
-				xml_attribute<>* attr_name = child->first_attribute("name");
+				std::string res_name;
+				if (child->first_attribute("name"))
+					res_name = child->first_attribute("name")->value();
+				if (res_name.empty() && child->first_attribute("filename"))
+					res_name = child->first_attribute("filename")->value();
 
-				if (!attr_name) {
-					std::string res_name = attr_name->value();
+				if (!res_name.empty()) {
 					LOGERR("Resource (%s)-(%s) failed to load\n", type.c_str(), res_name.c_str());
 				} else
 					LOGERR("Resource type (%s) failed to load\n", type.c_str());

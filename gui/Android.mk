@@ -33,7 +33,7 @@ else
   LOCAL_SRC_FILES += hardwarekeyboard.cpp
 endif
 
-LOCAL_SHARED_LIBRARIES += libminuitwrp libc libstdc++
+LOCAL_SHARED_LIBRARIES += libminuitwrp libc libstdc++ libminzip libaosprecovery
 LOCAL_MODULE := libguitwrp
 
 # Use this flag to create a build that simulates threaded actions like installing zips, backups, restores, and wipes for theme testing
@@ -47,12 +47,6 @@ ifeq ($(TWRP_EVENT_LOGGING), true)
 LOCAL_CFLAGS += -D_EVENT_LOGGING
 endif
 
-ifneq ($(RECOVERY_SDCARD_ON_DATA),)
-	LOCAL_CFLAGS += -DRECOVERY_SDCARD_ON_DATA
-endif
-ifneq ($(TW_EXTERNAL_STORAGE_PATH),)
-	LOCAL_CFLAGS += -DTW_EXTERNAL_STORAGE_PATH=$(TW_EXTERNAL_STORAGE_PATH)
-endif
 ifneq ($(TW_NO_SCREEN_BLANK),)
 	LOCAL_CFLAGS += -DTW_NO_SCREEN_BLANK
 endif
@@ -62,8 +56,11 @@ endif
 ifeq ($(HAVE_SELINUX), true)
 LOCAL_CFLAGS += -DHAVE_SELINUX
 endif
-ifeq ($(TW_OEM_BUILD),true)
+ifeq ($(TW_OEM_BUILD), true)
     LOCAL_CFLAGS += -DTW_OEM_BUILD
+endif
+ifeq ($(TW_DISABLE_TTF), true)
+    LOCAL_CFLAGS += -DTW_DISABLE_TTF
 endif
 
 ifeq ($(DEVICE_RESOLUTION),)
@@ -74,12 +71,14 @@ $(warning **********************************************************************
 $(error stopping)
 endif
 
-ifeq "$(wildcard bootable/recovery-twrp/gui/devices/$(DEVICE_RESOLUTION))" ""
-$(warning ********************************************************************************)
-$(warning * DEVICE_RESOLUTION ($(DEVICE_RESOLUTION)) does NOT EXIST in bootable/recovery-twrp/gui/devices )
-$(warning * Please choose an existing theme or create a new one for your device )
-$(warning ********************************************************************************)
-$(error stopping)
+ifeq ($(TW_CUSTOM_THEME),)
+	ifeq "$(wildcard $(commands_recovery_local_path)/gui/devices/$(DEVICE_RESOLUTION))" ""
+	$(warning ********************************************************************************)
+	$(warning * DEVICE_RESOLUTION ($(DEVICE_RESOLUTION)) does NOT EXIST in $(commands_recovery_local_path)/gui/devices )
+	$(warning * Please choose an existing theme or create a new one for your device )
+	$(warning ********************************************************************************)
+	$(error stopping)
+	endif
 endif
 
 LOCAL_C_INCLUDES += bionic external/stlport/stlport $(commands_recovery_local_path)/gui/devices/$(DEVICE_RESOLUTION)
@@ -93,12 +92,30 @@ LOCAL_MODULE_TAGS := eng
 LOCAL_MODULE_CLASS := RECOVERY_EXECUTABLES
 LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/res
 TWRP_RES_LOC := $(commands_recovery_local_path)/gui/devices/common/res
+TWRP_COMMON_XML := $(hide) echo "No common TWRP XML resources"
 
 ifeq ($(TW_CUSTOM_THEME),)
+	PORTRAIT := 320x480 480x800 480x854 540x960 720x1280 800x1280 1080x1920 1200x1920 1440x2560 1600x2560
+	LANDSCAPE := 800x480 1024x600 1024x768 1280x800 1920x1200 2560x1600
+	WATCH := 240x240 280x280 320x320
 	TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/devices/$(DEVICE_RESOLUTION)/res
+	ifneq ($(filter $(DEVICE_RESOLUTION), $(PORTRAIT)),)
+		TWRP_COMMON_XML := cp -fr $(commands_recovery_local_path)/gui/devices/portrait/res/* $(TARGET_RECOVERY_ROOT_OUT)/res/
+	else ifneq ($(filter $(DEVICE_RESOLUTION), $(LANDSCAPE)),)
+		TWRP_COMMON_XML := cp -fr $(commands_recovery_local_path)/gui/devices/landscape/res/* $(TARGET_RECOVERY_ROOT_OUT)/res/
+	else ifneq ($(filter $(DEVICE_RESOLUTION), $(WATCH)),)
+		TWRP_COMMON_XML := cp -fr $(commands_recovery_local_path)/gui/devices/watch/res/* $(TARGET_RECOVERY_ROOT_OUT)/res/
+	endif
 else
 	TWRP_THEME_LOC := $(TW_CUSTOM_THEME)
 endif
+
+ifeq ($(TW_DISABLE_TTF), true)
+	TWRP_REMOVE_FONT := rm -f $(TARGET_RECOVERY_ROOT_OUT)/res/fonts/*.ttf
+else
+	TWRP_REMOVE_FONT := rm -f $(TARGET_RECOVERY_ROOT_OUT)/res/fonts/*.dat
+endif
+
 TWRP_RES_GEN := $(intermediates)/twrp
 ifneq ($(TW_USE_TOOLBOX), true)
 	TWRP_SH_TARGET := /sbin/busybox
@@ -110,8 +127,12 @@ $(TWRP_RES_GEN):
 	mkdir -p $(TARGET_RECOVERY_ROOT_OUT)/res/
 	cp -fr $(TWRP_RES_LOC)/* $(TARGET_RECOVERY_ROOT_OUT)/res/
 	cp -fr $(TWRP_THEME_LOC)/* $(TARGET_RECOVERY_ROOT_OUT)/res/
+	$(TWRP_COMMON_XML)
+	$(TWRP_REMOVE_FONT)
 	mkdir -p $(TARGET_RECOVERY_ROOT_OUT)/sbin/
+ifneq ($(TW_USE_TOOLBOX), true)
 	ln -sf $(TWRP_SH_TARGET) $(TARGET_RECOVERY_ROOT_OUT)/sbin/sh
+endif
 	ln -sf /sbin/pigz $(TARGET_RECOVERY_ROOT_OUT)/sbin/gzip
 	ln -sf /sbin/unpigz $(TARGET_RECOVERY_ROOT_OUT)/sbin/gunzip
 
