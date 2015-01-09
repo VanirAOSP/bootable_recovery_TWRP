@@ -35,6 +35,13 @@ using namespace rapidxml;
 #include "pages.hpp"
 #include "../partitions.hpp"
 
+#ifndef TW_X_OFFSET
+#define TW_X_OFFSET 0
+#endif
+#ifndef TW_Y_OFFSET
+#define TW_Y_OFFSET 0
+#endif
+
 class RenderObject
 {
 public:
@@ -257,6 +264,8 @@ protected:
 // GUIAction - Used for standard actions
 class GUIAction : public GUIObject, public ActionObject
 {
+	friend class ActionThread;
+
 public:
 	GUIAction(xml_node<>* node);
 
@@ -281,20 +290,19 @@ protected:
 protected:
 	int getKeyByName(std::string key);
 	int doAction(Action action);
+	bool needsToRunInSeparateThread(const Action& action);
 	void simulate_progress_bar(void);
-	int flash_zip(std::string filename, std::string pageName, int* wipe_cache);
+	int flash_zip(std::string filename, int* wipe_cache);
 	void reinject_after_flash();
 	void operation_start(const string operation_name);
 	void operation_end(const int operation_status);
-	static void* command_thread(void *cookie);
-	static void* sideload_thread_fn(void *cookie);
-	static void* openrecoveryscript_thread_fn(void *cookie);
 	time_t Start;
 
 	// map action name to function pointer
 	typedef int (GUIAction::*execFunction)(std::string);
 	typedef std::map<std::string, execFunction> mapFunc;
 	static mapFunc mf;
+	static std::set<std::string> setActionsRunningInCallerThread;
 
 	// GUI actions
 	int reboot(std::string arg);
@@ -323,7 +331,7 @@ protected:
 	int screenshot(std::string arg);
 	int setbrightness(std::string arg);
 
-	// threaded actions
+	// (originally) threaded actions
 	int fileexists(std::string arg);
 	int flash(std::string arg);
 	int wipe(std::string arg);
@@ -351,8 +359,28 @@ protected:
 	int changefilesystem(std::string arg);
 	int startmtp(std::string arg);
 	int stopmtp(std::string arg);
+	int flashimage(std::string arg);
 
 	int simulate;
+};
+
+class ActionThread
+{
+public:
+	ActionThread();
+	~ActionThread();
+
+	void threadActions(GUIAction *act);
+	void run(void *data);
+private:
+	struct ThreadData
+	{
+		GUIAction *act;
+	};
+
+	pthread_t m_thread;
+	bool m_thread_running;
+	pthread_mutex_t m_act_lock;
 };
 
 class GUIConsole : public GUIObject, public RenderObject, public ActionObject
