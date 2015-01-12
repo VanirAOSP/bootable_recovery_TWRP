@@ -42,9 +42,7 @@
 
 #include "../adb_install.h"
 #include "../fuse_sideload.h"
-#ifndef TW_NO_SCREEN_TIMEOUT
 #include "blanktimer.hpp"
-#endif
 extern "C" {
 #include "../twcommon.h"
 #include "../minuitwrp/minui.h"
@@ -58,10 +56,6 @@ extern "C" {
 
 #include "rapidxml.hpp"
 #include "objects.hpp"
-
-#ifndef TW_NO_SCREEN_TIMEOUT
-extern blanktimer blankTimer;
-#endif
 
 void curtainClose(void);
 
@@ -367,7 +361,7 @@ int GUIAction::flash_zip(std::string filename, int* wipe_cache)
 
 bool GUIAction::needsToRunInSeparateThread(const GUIAction::Action& action)
 {
-	return setActionsRunningInCallerThread.find(action.mFunction) == setActionsRunningInCallerThread.end();
+	return setActionsRunningInCallerThread.find(gui_parse_text(action.mFunction)) == setActionsRunningInCallerThread.end();
 }
 
 int GUIAction::doActions()
@@ -391,8 +385,9 @@ int GUIAction::doActions()
 	}
 	else
 	{
-		for (it = mActions.begin(); it != mActions.end(); ++it)
-			doAction(*it);
+		const size_t cnt = mActions.size();
+		for (size_t i = 0; i < cnt; ++i)
+			doAction(mActions[i]);
 	}
 
 	return 0;
@@ -446,9 +441,7 @@ void GUIAction::operation_end(const int operation_status)
 	}
 	DataManager::SetValue("tw_operation_state", 1);
 	DataManager::SetValue(TW_ACTION_BUSY, 0);
-#ifndef TW_NO_SCREEN_TIMEOUT
 	blankTimer.resetTimerAndUnblank();
-#endif
 	time(&Stop);
 	if ((int) difftime(Stop, Start) > 10)
 		DataManager::Vibrate("tw_action_vibrate");
@@ -492,7 +485,6 @@ int GUIAction::reload(std::string arg)
 	int check = 0, ret_val = 0;
 	std::string theme_path;
 
-	operation_start("Reload Theme");
 	theme_path = DataManager::GetSettingsStoragePath();
 	if (PartitionManager.Mount_By_Path(theme_path.c_str(), 1) < 0) {
 		LOGERR("Unable to mount %s during reload function startup.\n", theme_path.c_str());
@@ -510,7 +502,6 @@ int GUIAction::reload(std::string arg)
 			ret_val = 1;
 		}
 	}
-	operation_end(ret_val);
 	return 0;
 }
 

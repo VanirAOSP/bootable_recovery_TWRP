@@ -45,14 +45,9 @@ extern "C" {
 
 #include "rapidxml.hpp"
 #include "objects.hpp"
-#ifndef TW_NO_SCREEN_TIMEOUT
 #include "blanktimer.hpp"
-#endif
 
 extern int gGuiRunning;
-#ifndef TW_NO_SCREEN_TIMEOUT
-extern blanktimer blankTimer;
-#endif
 
 std::map<std::string, PageSet*> PageManager::mPageSets;
 PageSet* PageManager::mCurrentSet;
@@ -562,11 +557,16 @@ PageSet::~PageSet()
 {
 	for (std::vector<Page*>::iterator itr = mPages.begin(); itr != mPages.end(); ++itr)
 		delete *itr;
-	for (std::vector<xml_node<>*>::iterator itr2 = templates.begin(); itr2 != templates.end(); ++itr2)
-		delete *itr2;
 
 	delete mResources;
 	free(mXmlFile);
+
+	mDoc.clear();
+
+	for (std::vector<xml_document<>*>::iterator itr = mIncludedDocs.begin(); itr != mIncludedDocs.end(); ++itr) {
+		(*itr)->clear();
+		delete *itr;
+	}
 }
 
 int PageSet::Load(ZipArchive* package)
@@ -610,7 +610,7 @@ int PageSet::Load(ZipArchive* package)
 			return -1;
 		}
 	}
-	
+
 	return CheckInclude(package, &mDoc);
 }
 
@@ -625,7 +625,7 @@ int PageSet::CheckInclude(ZipArchive* package, xml_document<> *parentDoc)
 	long len;
 	char* xmlFile = NULL;
 	string filename;
-	xml_document<> doc;
+	xml_document<> *doc = NULL;
 
 	par = parentDoc->first_node("recovery");
 	if (!par) {
@@ -687,11 +687,14 @@ int PageSet::CheckInclude(ZipArchive* package, xml_document<> *parentDoc)
 				return -1;
 			}
 		}
-		doc.parse<0>(xmlFile);
 
-		parent = doc.first_node("recovery");
+		xmlFile[len] = '\0';
+		doc = new xml_document<>();
+		doc->parse<0>(xmlFile);
+
+		parent = doc->first_node("recovery");
 		if (!parent)
-			parent = doc.first_node("install");
+			parent = doc->first_node("install");
 
 		// Now, let's parse the XML
 		LOGINFO("Loading included resources...\n");
@@ -716,11 +719,17 @@ int PageSet::CheckInclude(ZipArchive* package, xml_document<> *parentDoc)
 			templates.push_back(xmltemplate);
 
 		child = parent->first_node("pages");
-		if (child)
-			if (LoadPages(child))
-				return -1;
+		if (child && LoadPages(child))
+		{
+			templates.pop_back();
+			doc->clear();
+			delete doc;
+			return -1;
+		}
 
-		if (CheckInclude(package, &doc))
+		mIncludedDocs.push_back(doc);
+
+		if (CheckInclude(package, doc))
 			return -1;
 
 		chld = chld->next_sibling("xmlfile");
@@ -1197,10 +1206,8 @@ void PageManager::LoadCursorData(xml_node<>* node)
 
 int PageManager::Update(void)
 {
-#ifndef TW_NO_SCREEN_TIMEOUT
-	if(blankTimer.IsScreenOff())
+	if(blankTimer.isScreenOff())
 		return 0;
-#endif
 
 	int res = (mCurrentSet ? mCurrentSet->Update() : -1);
 
