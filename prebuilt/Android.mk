@@ -140,10 +140,8 @@ endif
 ifeq ($(TARGET_USERIMAGES_USE_F2FS), true)
     ifeq ($(PLATFORM_SDK_VERSION), 21)
         RELINK_SOURCE_FILES += $(TARGET_ROOT_OUT_SBIN)/mkfs.f2fs
-        #RELINK_SOURCE_FILES += $(TARGET_ROOT_OUT_SBIN)/fibmap.f2fs
     else
         RELINK_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/mkfs.f2fs
-        RELINK_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/fibmap.f2fs
     endif
     RELINK_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/fsck.f2fs
 endif
@@ -155,6 +153,9 @@ ifneq ($(TW_DISABLE_TTF), true)
 endif
 ifneq ($(TW_RECOVERY_ADDITIONAL_RELINK_FILES),)
     RELINK_SOURCE_FILES += $(TW_RECOVERY_ADDITIONAL_RELINK_FILES)
+endif
+ifneq ($(wildcard external/pcre/Android.mk),)
+    RELINK_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libpcre.so
 endif
 
 TWRP_AUTOGEN := $(intermediates)/teamwin
