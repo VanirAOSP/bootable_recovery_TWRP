@@ -899,9 +899,10 @@ protected:
 	{
 		unsigned char key;
 		unsigned char longpresskey;
-		unsigned int end_x;
-		unsigned int layout;
+		int end_x;
+		int layout;
 	};
+	int ParseKey(const char* keyinfo, keyboard_key_class& key, int& Xindex, int keyWidth, bool longpress);
 	struct capslock_tracking_struct
 	{
 		int capslock;
@@ -914,9 +915,8 @@ protected:
 	struct capslock_tracking_struct caps_tracking[MAX_KEYBOARD_LAYOUTS];
 	bool mRendered;
 	std::string mVariable;
-	unsigned int cursorLocation;
-	unsigned int currentLayout;
-	unsigned int row_heights[MAX_KEYBOARD_LAYOUTS][MAX_KEYBOARD_ROWS];
+	int currentLayout;
+	int row_heights[MAX_KEYBOARD_LAYOUTS][MAX_KEYBOARD_ROWS];
 	unsigned int KeyboardWidth, KeyboardHeight;
 	int rowY, colX, highlightRenderCount, hasHighlight, hasCapsHighlight;
 	GUIAction* mAction;
@@ -992,17 +992,22 @@ protected:
 class HardwareKeyboard
 {
 public:
-	HardwareKeyboard(void);
+	HardwareKeyboard();
 	virtual ~HardwareKeyboard();
 
 public:
-	virtual int KeyDown(int key_code);
-	virtual int KeyUp(int key_code);
-	virtual int KeyRepeat(void);
+	// called by the input handler for key events
+	int KeyDown(int key_code);
+	int KeyUp(int key_code);
 
+	// called by the input handler when holding a key down
+	int KeyRepeat();
+
+	// called by multi-key actions to suppress key-release notifications
 	void ConsumeKeyRelease(int key);
 
 private:
+	int mLastKeyChar;
 	std::set<int> mPressedKeys;
 };
 
