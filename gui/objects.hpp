@@ -211,13 +211,12 @@ protected:
 	std::string mLastValue;
 	COLOR mColor;
 	COLOR mHighlightColor;
-	Resource* mFont;
+	FontResource* mFont;
 	int mIsStatic;
 	int mVarChanged;
 	int mFontHeight;
 	unsigned maxWidth;
 	unsigned charSkip;
-	bool hasHighlightColor;
 
 protected:
 	std::string parseText(void);
@@ -242,8 +241,8 @@ public:
 	bool isHighlighted;
 
 protected:
-	Resource* mImage;
-	Resource* mHighlightImage;
+	ImageResource* mImage;
+	ImageResource* mHighlightImage;
 };
 
 // GUIFill - Used for fill colors
@@ -402,8 +401,8 @@ protected:
 		request_show
 	};
 
-	Resource* mFont;
-	Resource* mSlideoutImage;
+	FontResource* mFont;
+	ImageResource* mSlideoutImage;
 	COLOR mForegroundColor;
 	COLOR mBackgroundColor;
 	COLOR mScrollColor;
@@ -453,7 +452,7 @@ public:
 
 protected:
 	GUIImage* mButtonImg;
-	Resource* mButtonIcon;
+	ImageResource* mButtonIcon;
 	GUIText* mButtonLabel;
 	GUIAction* mAction;
 	int mTextX, mTextY, mTextW, mTextH;
@@ -491,20 +490,14 @@ public:
 	virtual int NotifyTouch(TOUCH_STATE state, int x, int y);
 
 protected:
-	Resource* mChecked;
-	Resource* mUnchecked;
+	ImageResource* mChecked;
+	ImageResource* mUnchecked;
 	GUIText* mLabel;
 	int mTextX, mTextY;
 	int mCheckX, mCheckY, mCheckW, mCheckH;
 	int mLastState;
 	bool mRendered;
 	std::string mVarName;
-};
-
-struct ScrollListData {
-	Resource* displayResource;
-	std::string displayName;
-	int list_index;
 };
 
 class GUIScrollList : public GUIObject, public RenderObject, public ActionObject
@@ -541,7 +534,7 @@ protected:
 	// get number of items
 	virtual size_t GetItemCount() { return 0; }
 	// get data for one item
-	virtual int GetListItem(size_t item_index, Resource*& icon, std::string &text)
+	virtual int GetListItem(size_t item_index, ImageResource*& icon, std::string &text)
 		{ icon = NULL; text = ""; return -1; }
 	// an item was selected
 	virtual void NotifySelect(size_t item_selected) {}
@@ -559,7 +552,7 @@ protected:
 	// Handle scrolling changes for drags and kinetic scrolling
 	void HandleScrolling();
 
-	// Returns many rows the list is capable of displaying
+	// Returns many full rows the list is capable of displaying
 	int GetDisplayItemCount();
 
 	// Returns the size in pixels of a partial item or row size
@@ -568,7 +561,7 @@ protected:
 protected:
 	// Background
 	COLOR mBackgroundColor;
-	Resource* mBackground; // background image, if any, automatically centered
+	ImageResource* mBackground; // background image, if any, automatically centered
 	int mBackgroundW, mBackgroundH; // background width and height if using an image for the background
 
 	// Header
@@ -576,19 +569,18 @@ protected:
 	COLOR mHeaderFontColor;
 	std::string mHeaderText; // Original header text without parsing any variables
 	std::string mLastHeaderValue; // Header text after parsing variables
-	int mHeaderIsStatic; // indicates if the header is static (no need to check for changes in NotifyVarChange)
+	bool mHeaderIsStatic; // indicates if the header is static (no need to check for changes in NotifyVarChange)
 	int mHeaderH; // actual header height including font, icon, padding, and separator heights
-	Resource* mHeaderIcon;
+	ImageResource* mHeaderIcon;
 	int mHeaderIconHeight, mHeaderIconWidth; // width and height of the header icon if present
 	int mHeaderSeparatorH; // Height of the separator between header and list items
 	COLOR mHeaderSeparatorColor; // color of the header separator
 
 	// Per-item layout
-	Resource* mFont;
+	FontResource* mFont;
 	COLOR mFontColor;
-	bool hasHighlightColor; // indicates if a hightlight color was set
-	bool hasFontHighlightColor; // indicates if the font hightlight color is set
-	COLOR mHighlightColor; // background row hightlight color
+	bool hasHighlightColor; // indicates if a highlight color was set
+	COLOR mHighlightColor; // background row highlight color
 	COLOR mFontHighlightColor;
 	int mFontHeight;
 	int actualItemHeight; // Actual height of each item in pixels including max icon size, font size, and padding
@@ -633,7 +625,7 @@ public:
 	virtual void SetPageFocus(int inFocus);
 
 	virtual size_t GetItemCount();
-	virtual int GetListItem(size_t item_index, Resource*& icon, std::string &text);
+	virtual int GetListItem(size_t item_index, ImageResource*& icon, std::string &text);
 	virtual void NotifySelect(size_t item_selected);
 
 protected:
@@ -664,8 +656,8 @@ protected:
 	int mShowFolders, mShowFiles; // indicates if the list should show folders and/or files
 	int mShowNavFolders; // indicates if the list should include the "up a level" item and allow you to traverse folders (nav folders are disabled for the restore list, for instance)
 	static int mSortOrder; // must be static because it is used by the static function fileSort
-	Resource* mFolderIcon;
-	Resource* mFileIcon;
+	ImageResource* mFolderIcon;
+	ImageResource* mFileIcon;
 	bool updateFileList;
 };
 
@@ -687,7 +679,7 @@ public:
 	virtual void SetPageFocus(int inFocus);
 
 	virtual size_t GetItemCount();
-	virtual int GetListItem(size_t item_index, Resource*& icon, std::string &text);
+	virtual int GetListItem(size_t item_index, ImageResource*& icon, std::string &text);
 	virtual void NotifySelect(size_t item_selected);
 
 protected:
@@ -701,8 +693,8 @@ protected:
 	std::vector<ListData> mList;
 	std::string mVariable;
 	std::string currentValue;
-	Resource* mIconSelected;
-	Resource* mIconUnselected;
+	ImageResource* mIconSelected;
+	ImageResource* mIconUnselected;
 };
 
 class GUIPartitionList : public GUIScrollList
@@ -723,7 +715,7 @@ public:
 	virtual void SetPageFocus(int inFocus);
 
 	virtual size_t GetItemCount();
-	virtual int GetListItem(size_t item_index, Resource*& icon, std::string &text);
+	virtual int GetListItem(size_t item_index, ImageResource*& icon, std::string &text);
 	virtual void NotifySelect(size_t item_selected);
 
 protected:
@@ -737,8 +729,8 @@ protected:
 	std::string selectedList;
 	std::string currentValue;
 	std::string mLastValue;
-	Resource* mIconSelected;
-	Resource* mIconUnselected;
+	ImageResource* mIconSelected;
+	ImageResource* mIconUnselected;
 	bool updateList;
 };
 
@@ -785,8 +777,8 @@ public:
 	virtual int NotifyVarChange(const std::string& varName, const std::string& value);
 
 protected:
-	Resource* mEmptyBar;
-	Resource* mFullBar;
+	ImageResource* mEmptyBar;
+	ImageResource* mFullBar;
 	std::string mMinValVar;
 	std::string mMaxValVar;
 	std::string mCurValVar;
@@ -820,9 +812,9 @@ public:
 
 protected:
 	GUIAction* sAction;
-	Resource* sSlider;
-	Resource* sSliderUsed;
-	Resource* sTouch;
+	ImageResource* sSlider;
+	ImageResource* sSliderUsed;
+	ImageResource* sTouch;
 	int sTouchW, sTouchH;
 	int sCurTouchX;
 	int sUpdate;
@@ -875,7 +867,7 @@ protected:
 		int revert_layout;
 	};
 
-	Resource* keyboardImg[MAX_KEYBOARD_LAYOUTS];
+	ImageResource* keyboardImg[MAX_KEYBOARD_LAYOUTS];
 	struct keyboard_key_class keyboard_keys[MAX_KEYBOARD_LAYOUTS][MAX_KEYBOARD_ROWS][MAX_KEYBOARD_KEYS];
 	struct capslock_tracking_struct caps_tracking[MAX_KEYBOARD_LAYOUTS];
 	bool mRendered;
@@ -924,9 +916,9 @@ protected:
 protected:
 	GUIText* mInputText;
 	GUIAction* mAction;
-	Resource* mBackground;
-	Resource* mCursor;
-	Resource* mFont;
+	ImageResource* mBackground;
+	ImageResource* mCursor;
+	FontResource* mFont;
 	std::string mText;
 	std::string mLastValue;
 	std::string mVariable;
@@ -1019,7 +1011,7 @@ protected:
 	float mValuePct;
 	std::string mMaxStr;
 	std::string mMinStr;
-	Resource *mFont;
+	FontResource *mFont;
 	GUIText* mLabel;
 	int mLabelW;
 	COLOR mTextColor;
@@ -1041,9 +1033,9 @@ protected:
 	bool mChangeOnDrag;
 	int mLineW;
 	bool mDragging;
-	Resource *mBackgroundImage;
-	Resource *mHandleImage;
-	Resource *mHandleHoverImage;
+	ImageResource *mBackgroundImage;
+	ImageResource *mHandleImage;
+	ImageResource *mHandleHoverImage;
 };
 
 class MouseCursor : public RenderObject
@@ -1067,11 +1059,20 @@ private:
 	bool m_moved;
 	float m_speedMultiplier;
 	COLOR m_color;
-	Resource *m_image;
+	ImageResource *m_image;
 	bool m_present;
 };
 
 // Helper APIs
+std::string LoadAttrString(xml_node<>* element, const char* attrname, const char* defaultvalue = "");
+int LoadAttrInt(xml_node<>* element, const char* attrname, int defaultvalue = 0);
+int LoadAttrIntScaleX(xml_node<>* element, const char* attrname, int defaultvalue = 0);
+int LoadAttrIntScaleY(xml_node<>* element, const char* attrname, int defaultvalue = 0);
+COLOR LoadAttrColor(xml_node<>* element, const char* attrname, COLOR defaultvalue = COLOR(0,0,0,0));
+FontResource* LoadAttrFont(xml_node<>* element, const char* attrname);
+ImageResource* LoadAttrImage(xml_node<>* element, const char* attrname);
+AnimationResource* LoadAttrAnimation(xml_node<>* element, const char* attrname);
+
 bool LoadPlacement(xml_node<>* node, int* x, int* y, int* w = NULL, int* h = NULL, RenderObject::Placement* placement = NULL);
 
 #endif  // _OBJECTS_HEADER
