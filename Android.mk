@@ -14,6 +14,8 @@
 
 LOCAL_PATH := $(call my-dir)
 
+ifeq ($(RECOVERY_VARIANT),twrp)
+
 ifdef project-path-for
     ifeq ($(LOCAL_PATH),$(call project-path-for,recovery))
         PROJECT_PATH_AGREES := true
@@ -522,3 +524,4 @@ endif
 commands_recovery_local_path :=
 
 endif
+endif # ($(RECOVERY_VARIANT),twrp)
