@@ -418,7 +418,7 @@ bool TWPartition::Process_Fstab_Line(string Line, bool Display_Error) {
 	return true;
 }
 
-bool TWPartition::Process_FS_Flags(string& Options, int Flags) {
+bool TWPartition::Process_FS_Flags(string& Options, int& Flags) {
 	int i;
 	char *p;
 	char *savep;
@@ -968,35 +968,29 @@ bool TWPartition::Mount(bool Display_Error) {
 
 	// Check the current file system before mounting
 	Check_FS_Type();
-	if (Current_File_System == "exfat" && TWFunc::Path_Exists("/sbin/exfat-fuse")) {
-		string cmd = "/sbin/exfat-fuse -o big_writes,max_read=131072,max_write=131072 " + Actual_Block_Device + " " + Mount_Point;
+	if (Current_File_System == "exfat" && TWFunc::Path_Exists("/sbin/mount.exfat")) {
+		string cmd = "/sbin/mount.exfat -o big_writes,max_read=131072,max_write=131072 " + Actual_Block_Device + " " + Mount_Point;
 		LOGINFO("cmd: %s\n", cmd.c_str());
 		string result;
 		if (TWFunc::Exec_Cmd(cmd, result) != 0) {
-			LOGINFO("exfat-fuse failed to mount with result '%s', trying vfat\n", result.c_str());
+			LOGINFO("mount.exfat failed to mount with result '%s', trying vfat\n", result.c_str());
 			Current_File_System = "vfat";
 		} else {
-#ifdef TW_NO_EXFAT_FUSE
-			UnMount(false);
-			// We'll let the kernel handle it but using exfat-fuse to detect if the file system is actually exfat
-			// Some kernels let us mount vfat as exfat which doesn't work out too well
-#else
 			exfat_mounted = 1;
-#endif
 		}
 	}
 
-	if (Current_File_System == "ntfs" && TWFunc::Path_Exists("/sbin/ntfs-3g")) {
+	if (Current_File_System == "ntfs" && TWFunc::Path_Exists("/sbin/mount.ntfs")) {
 		string cmd;
 		if (Mount_Read_Only)
-			cmd = "/sbin/ntfs-3g -o ro " + Actual_Block_Device + " " + Mount_Point;
+			cmd = "/sbin/mount.ntfs -o ro " + Actual_Block_Device + " " + Mount_Point;
 		else
-			cmd = "/sbin/ntfs-3g " + Actual_Block_Device + " " + Mount_Point;
+			cmd = "/sbin/mount.ntfs " + Actual_Block_Device + " " + Mount_Point;
 		LOGINFO("cmd: '%s'\n", cmd.c_str());
 		if (TWFunc::Exec_Cmd(cmd) == 0) {
 			return true;
 		} else {
-			LOGINFO("ntfs-3g failed to mount, trying regular mount method.\n");
+			LOGINFO("mount.ntfs failed to mount, trying regular mount method.\n");
 		}
 	}
 
@@ -1049,30 +1043,15 @@ bool TWPartition::Mount(bool Display_Error) {
 		mount_fs = "texfat";
 
 	if (!exfat_mounted &&
-		mount(Actual_Block_Device.c_str(), Mount_Point.c_str(), mount_fs.c_str(), flags, Mount_Options.c_str()) != 0 &&
-		mount(Actual_Block_Device.c_str(), Mount_Point.c_str(), mount_fs.c_str(), flags, NULL) != 0) {
-#ifdef TW_NO_EXFAT_FUSE
-		if (Current_File_System == "exfat") {
-			LOGINFO("Mounting exfat failed, trying vfat...\n");
-			if (mount(Actual_Block_Device.c_str(), Mount_Point.c_str(), "vfat", 0, NULL) != 0) {
-				if (Display_Error)
-					LOGERR("Unable to mount '%s'\n", Mount_Point.c_str());
-				else
-					LOGINFO("Unable to mount '%s'\n", Mount_Point.c_str());
-				LOGINFO("Actual block device: '%s', current file system: '%s', flags: 0x%8x, options: '%s'\n", Actual_Block_Device.c_str(), Current_File_System.c_str(), flags, Mount_Options.c_str());
-				return false;
-			}
-		} else {
-#endif
-			if (!Removable && Display_Error)
-				LOGERR("Unable to mount '%s'\n", Mount_Point.c_str());
-			else
-				LOGINFO("Unable to mount '%s'\n", Mount_Point.c_str());
-			LOGINFO("Actual block device: '%s', current file system: '%s'\n", Actual_Block_Device.c_str(), Current_File_System.c_str());
-			return false;
-#ifdef TW_NO_EXFAT_FUSE
-		}
-#endif
+			mount(Actual_Block_Device.c_str(), Mount_Point.c_str(), mount_fs.c_str(), flags, Mount_Options.c_str()) != 0 &&
+			mount(Actual_Block_Device.c_str(), Mount_Point.c_str(), mount_fs.c_str(), flags, NULL) != 0) {
+		if (!Removable && Display_Error)
+			LOGERR("Unable to mount '%s'\n", Mount_Point.c_str());
+		else
+			LOGINFO("Unable to mount '%s'\n", Mount_Point.c_str());
+
+		LOGINFO("Actual block device: '%s', current file system: '%s'\n", Actual_Block_Device.c_str(), Current_File_System.c_str());
+		return false;
 	}
 
 	if (Removable)
@@ -1215,7 +1194,7 @@ bool TWPartition::Wipe_AndSec(void) {
 bool TWPartition::Can_Repair() {
 	if (Mount_Read_Only)
 		return false;
-	if (Current_File_System == "vfat" && TWFunc::Path_Exists("/sbin/dosfsck"))
+	if (Current_File_System == "vfat" && TWFunc::Path_Exists("/sbin/fsck.fat"))
 		return true;
 	else if ((Current_File_System == "ext2" || Current_File_System == "ext3" || Current_File_System == "ext4") && TWFunc::Path_Exists("/sbin/e2fsck"))
 		return true;
@@ -1223,7 +1202,7 @@ bool TWPartition::Can_Repair() {
 		return true;
 	else if (Current_File_System == "f2fs" && TWFunc::Path_Exists("/sbin/fsck.f2fs"))
 		return true;
-	else if (Current_File_System == "ntfs" && TWFunc::Path_Exists("/sbin/ntfsfix"))
+	else if (Current_File_System == "ntfs" && TWFunc::Path_Exists("/sbin/fsck.ntfs"))
 		return true;
 	return false;
 }
@@ -1232,15 +1211,15 @@ bool TWPartition::Repair() {
 	string command;
 
 	if (Current_File_System == "vfat") {
-		if (!TWFunc::Path_Exists("/sbin/dosfsck")) {
-			gui_print("dosfsck does not exist! Cannot repair!\n");
+		if (!TWFunc::Path_Exists("/sbin/fsck.fat")) {
+			gui_print("fsck.fat does not exist! Cannot repair!\n");
 			return false;
 		}
 		if (!UnMount(true))
 			return false;
-		gui_print("Repairing %s using dosfsck...\n", Display_Name.c_str());
+		gui_print("Repairing %s using fsck.fat...\n", Display_Name.c_str());
 		Find_Actual_Block_Device();
-		command = "/sbin/dosfsck -y " + Actual_Block_Device;
+		command = "/sbin/fsck.fat -y " + Actual_Block_Device;
 		LOGINFO("Repair command: %s\n", command.c_str());
 		if (TWFunc::Exec_Cmd(command) == 0) {
 			gui_print("Done.\n");
@@ -1308,15 +1287,15 @@ bool TWPartition::Repair() {
 		}
 	}
 	if (Current_File_System == "ntfs") {
-		if (!TWFunc::Path_Exists("/sbin/ntfsfix")) {
-			gui_print("ntfsfix does not exist! Cannot repair!\n");
+		if (!TWFunc::Path_Exists("/sbin/fsck.ntfs")) {
+			gui_print("fsck.ntfs does not exist! Cannot repair!\n");
 			return false;
 		}
 		if (!UnMount(true))
 			return false;
-		gui_print("Repairing %s using ntfsfix...\n", Display_Name.c_str());
+		gui_print("Repairing %s using fsck.ntfs...\n", Display_Name.c_str());
 		Find_Actual_Block_Device();
-		command = "/sbin/ntfsfix " + Actual_Block_Device;
+		command = "/sbin/fsck.ntfs " + Actual_Block_Device;
 		LOGINFO("Repair command: %s\n", command.c_str());
 		if (TWFunc::Exec_Cmd(command) == 0) {
 			gui_print("Done.\n");
@@ -1572,6 +1551,7 @@ bool TWPartition::Wipe_Encryption() {
 						} else {
 							LOGINFO("Successfully wiped crypto footer.\n");
 						}
+						free(buffer);
 					}
 				}
 			}
@@ -1689,12 +1669,12 @@ bool TWPartition::Wipe_EXT4() {
 		return true;
 	}
 #else
-	if (TWFunc::Path_Exists("/sbin/make_ext4fs")) {
+	if (TWFunc::Path_Exists("/sbin/mkfs.ext4")) {
 		string Command;
 
-		gui_print("Formatting %s using make_ext4fs...\n", Display_Name.c_str());
+		gui_print("Formatting %s using mkfs.ext4...\n", Display_Name.c_str());
 		Find_Actual_Block_Device();
-		Command = "make_ext4fs";
+		Command = "mkfs.ext4";
 		if (!Is_Decrypted && Length != 0) {
 			// Only use length if we're not decrypted
 			char len[32];
@@ -1706,7 +1686,7 @@ bool TWPartition::Wipe_EXT4() {
 			Command += " -S /file_contexts";
 		}
 		Command += " -a " + Mount_Point + " " + Actual_Block_Device;
-		LOGINFO("make_ext4fs command: %s\n", Command.c_str());
+		LOGINFO("mkfs.ext4 command: %s\n", Command.c_str());
 		if (TWFunc::Exec_Cmd(Command) == 0) {
 			Current_File_System = "ext4";
 			Recreate_AndSec_Folder();
@@ -1725,13 +1705,13 @@ bool TWPartition::Wipe_EXT4() {
 bool TWPartition::Wipe_FAT() {
 	string command;
 
-	if (TWFunc::Path_Exists("/sbin/mkdosfs")) {
+	if (TWFunc::Path_Exists("/sbin/mkfs.fat")) {
 		if (!UnMount(true))
 			return false;
 
-		gui_print("Formatting %s using mkdosfs...\n", Display_Name.c_str());
+		gui_print("Formatting %s using mkfs.fat...\n", Display_Name.c_str());
 		Find_Actual_Block_Device();
-		command = "mkdosfs " + Actual_Block_Device;
+		command = "mkfs.fat " + Actual_Block_Device;
 		if (TWFunc::Exec_Cmd(command) == 0) {
 			Current_File_System = "vfat";
 			Recreate_AndSec_Folder();
@@ -1752,13 +1732,13 @@ bool TWPartition::Wipe_FAT() {
 bool TWPartition::Wipe_EXFAT() {
 	string command;
 
-	if (TWFunc::Path_Exists("/sbin/mkexfatfs")) {
+	if (TWFunc::Path_Exists("/sbin/mkfs.exfat")) {
 		if (!UnMount(true))
 			return false;
 
-		gui_print("Formatting %s using mkexfatfs...\n", Display_Name.c_str());
+		gui_print("Formatting %s using mkfs.exfat...\n", Display_Name.c_str());
 		Find_Actual_Block_Device();
-		command = "mkexfatfs " + Actual_Block_Device;
+		command = "mkfs.exfat " + Actual_Block_Device;
 		if (TWFunc::Exec_Cmd(command) == 0) {
 			Recreate_AndSec_Folder();
 			gui_print("Done.\n");
@@ -1860,13 +1840,13 @@ bool TWPartition::Wipe_F2FS() {
 bool TWPartition::Wipe_NTFS() {
 	string command;
 
-	if (TWFunc::Path_Exists("/sbin/mkntfs")) {
+	if (TWFunc::Path_Exists("/sbin/mkfs.ntfs")) {
 		if (!UnMount(true))
 			return false;
 
-		gui_print("Formatting %s using mkntfs...\n", Display_Name.c_str());
+		gui_print("Formatting %s using mkfs.ntfs...\n", Display_Name.c_str());
 		Find_Actual_Block_Device();
-		command = "mkntfs " + Actual_Block_Device;
+		command = "mkfs.ntfs " + Actual_Block_Device;
 		if (TWFunc::Exec_Cmd(command) == 0) {
 			Recreate_AndSec_Folder();
 			gui_print("Done.\n");
