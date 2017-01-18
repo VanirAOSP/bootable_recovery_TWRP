@@ -83,7 +83,7 @@ static int gRecorder = -1;
 
 extern "C" void gr_write_frame_to_file(int fd);
 
-void flip(void)
+static void flip(void)
 {
 	if (gRecorder != -1)
 	{
@@ -205,7 +205,9 @@ bool InputHandler::processInput(int timeout_ms)
 		break;
 	}
 
-	blankTimer.resetTimerAndUnblank();
+	if (ev.code != KEY_POWER && ev.code > KEY_RESERVED)
+		blankTimer.resetTimerAndUnblank();
+
 	return true;  // we got an event, so there might be more in the queue
 }
 
