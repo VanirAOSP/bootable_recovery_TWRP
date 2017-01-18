@@ -92,12 +92,12 @@ LOCAL_MODULE := twrp
 LOCAL_MODULE_TAGS := eng
 LOCAL_MODULE_CLASS := RECOVERY_EXECUTABLES
 LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)$(TWRES_PATH)
-TWRP_RES := $(commands_recovery_local_path)/gui/devices/common/res/*
-# enable this to use new themes:
-TWRP_NEW_THEME := true
 
 ifeq ($(TW_CUSTOM_THEME),)
     ifeq ($(TW_THEME),)
+        ifeq ($(DEVICE_RESOLUTION),)
+            DEVICE_RESOLUTION := $(TARGET_SCREEN_WIDTH)x$(TARGET_SCREEN_HEIGHT)
+        endif
         # This converts the old DEVICE_RESOLUTION flag to the new TW_THEME flag
         PORTRAIT_MDPI := 320x480 480x800 480x854 540x960
         PORTRAIT_HDPI := 720x1280 800x1280 1080x1920 1200x1920 1440x2560 1600x2560
@@ -117,11 +117,10 @@ ifeq ($(TW_CUSTOM_THEME),)
         endif
     endif
 
-ifeq ($(TWRP_NEW_THEME),true)
-    TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/theme/$(TW_THEME)
-    TWRP_RES := $(commands_recovery_local_path)/gui/theme/common/fonts
-    TWRP_RES += $(commands_recovery_local_path)/gui/theme/common/languages
-    TWRP_RES += $(commands_recovery_local_path)/gui/theme/common/$(word 1,$(subst _, ,$(TW_THEME))).xml
+TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/theme/$(TW_THEME)
+TWRP_RES := $(commands_recovery_local_path)/gui/theme/common/fonts
+TWRP_RES += $(commands_recovery_local_path)/gui/theme/common/languages
+TWRP_RES += $(commands_recovery_local_path)/gui/theme/common/$(word 1,$(subst _, ,$(TW_THEME))).xml
 ifeq ($(TW_EXTRA_LANGUAGES),true)
     TWRP_RES += $(commands_recovery_local_path)/gui/theme/extra-languages/fonts
     TWRP_RES += $(commands_recovery_local_path)/gui/theme/extra-languages/languages
@@ -138,28 +137,6 @@ ifeq ($(wildcard $(TWRP_THEME_LOC)/ui.xml),)
     $(warning * $(notdir $(wildcard $(commands_recovery_local_path)/gui/theme/*_*)))
     $(warning ****************************************************************************)
     $(error stopping)
-endif
-else
-    TWRP_RES += $(commands_recovery_local_path)/gui/devices/$(word 1,$(subst _, ,$(TW_THEME)))/res/*
-    ifeq ($(TW_THEME), portrait_mdpi)
-        TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/devices/480x800/res
-    else ifeq ($(TW_THEME), portrait_hdpi)
-        TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/devices/1080x1920/res
-    else ifeq ($(TW_THEME), watch_mdpi)
-        TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/devices/320x320/res
-    else ifeq ($(TW_THEME), landscape_mdpi)
-        TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/devices/800x480/res
-    else ifeq ($(TW_THEME), landscape_hdpi)
-        TWRP_THEME_LOC := $(commands_recovery_local_path)/gui/devices/1920x1200/res
-    else
-        $(warning ****************************************************************************)
-        $(warning * TW_THEME ($(TW_THEME)) is not valid.)
-        $(warning * Please choose an appropriate TW_THEME or create a new one for your device.)
-        $(warning * Valid options are portrait_mdpi portrait_hdpi watch_mdpi)
-        $(warning *                   landscape_mdpi landscape_hdpi)
-        $(warning ****************************************************************************)
-        $(error stopping)
-    endif
 endif
 else
     TWRP_THEME_LOC := $(TW_CUSTOM_THEME)
